@@ -1,4 +1,5 @@
 import { runSaga } from 'redux-saga';
+import type { StoreAction } from '@themislib/themis/types';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { Note } from '$shared/types';
 import type { TaskPlanConfiguration } from '$lib/client/app-client';
@@ -55,8 +56,12 @@ describe('task planning persistence', () => {
   it('loads complete canonical source once after checking the acknowledged capability', async () => {
     mocks.get.mockResolvedValue(note);
     const action = taskPlanOpened('w', 't', 'original');
-    const emitted: unknown[] = [];
-    await runSaga({ dispatch: (value) => emitted.push(value) }, openTaskPlan, action).toPromise();
+    const emitted: StoreAction<unknown>[] = [];
+    await runSaga(
+      { dispatch: (value: StoreAction<unknown>) => emitted.push(value) },
+      openTaskPlan,
+      action,
+    ).toPromise();
     expect(mocks.get).toHaveBeenCalledExactlyOnceWith('t', 'w');
     expect(emitted).toEqual([applyNoteUpdated('w', 't', note), action.success(note)]);
     expect(mocks.configure).not.toHaveBeenCalled();
@@ -74,9 +79,9 @@ describe('task planning persistence', () => {
     };
     mocks.configure.mockResolvedValue(confirmation);
     const action = taskPlanConfirmed(input, 'original');
-    const emitted: unknown[] = [];
+    const emitted: StoreAction<unknown>[] = [];
     await runSaga(
-      { dispatch: (value) => emitted.push(value) },
+      { dispatch: (value: StoreAction<unknown>) => emitted.push(value) },
       confirmTaskPlan,
       action,
     ).toPromise();
@@ -85,9 +90,13 @@ describe('task planning persistence', () => {
   });
   it('refuses an older daemon before reading or writing and preserves CAS conflicts', async () => {
     mocks.supports.mockResolvedValue(false);
-    const emitted: { type: string }[] = [];
+    const emitted: StoreAction<unknown>[] = [];
     const open = taskPlanOpened('w', 't', 'original');
-    await runSaga({ dispatch: (value) => emitted.push(value) }, openTaskPlan, open).toPromise();
+    await runSaga(
+      { dispatch: (value: StoreAction<unknown>) => emitted.push(value) },
+      openTaskPlan,
+      open,
+    ).toPromise();
     expect(mocks.get).not.toHaveBeenCalled();
     expect(mocks.configure).not.toHaveBeenCalled();
     expect(emitted[0].type).toBe(open.failure(new Error()).type);
@@ -96,7 +105,7 @@ describe('task planning persistence', () => {
     mocks.configure.mockRejectedValue(conflict);
     const confirm = taskPlanConfirmed(input, 'original');
     await runSaga(
-      { dispatch: (value) => emitted.push(value) },
+      { dispatch: (value: StoreAction<unknown>) => emitted.push(value) },
       confirmTaskPlan,
       confirm,
     ).toPromise();
@@ -107,8 +116,12 @@ describe('task planning persistence', () => {
   it('refuses an already replaced review before mutation and retains a successful old-owner save without publishing it', async () => {
     mocks.admission = 'replacement';
     const stale = taskPlanConfirmed(input, 'original');
-    const emitted: unknown[] = [];
-    await runSaga({ dispatch: (value) => emitted.push(value) }, confirmTaskPlan, stale).toPromise();
+    const emitted: StoreAction<unknown>[] = [];
+    await runSaga(
+      { dispatch: (value: StoreAction<unknown>) => emitted.push(value) },
+      confirmTaskPlan,
+      stale,
+    ).toPromise();
     expect(mocks.configure).not.toHaveBeenCalled();
     mocks.admission = 'original';
     const confirmation = {
@@ -128,7 +141,7 @@ describe('task planning persistence', () => {
     const action = taskPlanConfirmed(input, 'original');
     emitted.length = 0;
     await runSaga(
-      { dispatch: (value) => emitted.push(value) },
+      { dispatch: (value: StoreAction<unknown>) => emitted.push(value) },
       confirmTaskPlan,
       action,
     ).toPromise();

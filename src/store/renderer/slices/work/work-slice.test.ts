@@ -56,11 +56,11 @@ describe('work projection reducer', () => {
     const next = workReducer(old, workCaptureStarted('ws', 'next'));
     expect(workReducer(next, workCaptureRetired('ws', 'capture'))).toBe(next);
   });
-  it.each([workspaceUnmounted, workspaceDeleted, removeWorkspaceEntity])(
+  it.each([workspaceUnmounted('ws'), workspaceDeleted('ws', []), removeWorkspaceEntity('ws')])(
     'clears workspace state on cleanup',
     (action) => {
       const state = workReducer(initialState, workCaptureStarted('ws', 'capture'));
-      expect(workReducer(state, action('ws')).byWorkspaceId).toEqual({});
+      expect(workReducer(state, action).byWorkspaceId).toEqual({});
     },
   );
 });

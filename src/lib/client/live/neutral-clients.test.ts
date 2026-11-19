@@ -113,7 +113,9 @@ const receipt = {
   decidedAt: '2026-11-13T00:00:00Z',
 };
 
-function vcsPort(kind: 'git' | 'atomic' = 'git'): VcsServicePort {
+function vcsPort(
+  kind: 'git' | 'atomic' = 'git',
+): VcsServicePort & Required<Pick<VcsServicePort, 'status'>> {
   return {
     isCurrent: () => true,
     capabilities: () => ({ vcs: 1, atomic: 1 }),

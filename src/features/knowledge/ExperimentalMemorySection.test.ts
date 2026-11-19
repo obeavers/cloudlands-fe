@@ -11,10 +11,19 @@ import {
   memoryReadRetired,
 } from '$store/renderer/slices/memory-read/memory-read-slice';
 
+type MemoryReadAction = ReturnType<
+  | typeof memoryReadMounted
+  | typeof memoryReadUnmounted
+  | typeof memoryReadReady
+  | typeof memoryReadLoaded
+  | typeof memoryReadRequested
+  | typeof memoryReadRetired
+>;
+
 const harness = vi.hoisted(() => ({
   dispatch: vi.fn(),
   reset: () => {},
-  onAction: (_action: { type: string; payload: unknown[] }) => {},
+  onAction: (_action: MemoryReadAction) => {},
 }));
 vi.mock('$store/renderer/store', async () => {
   const { memoryReadReducer } =

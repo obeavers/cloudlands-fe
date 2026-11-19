@@ -70,7 +70,7 @@ describe('injected neutral channel registration', () => {
     let resolve!: (stop: () => void) => void;
     s.port.subscribe = vi.fn(
       () =>
-        new Promise((done) => {
+        new Promise<() => void>((done) => {
           resolve = done;
         }),
     );

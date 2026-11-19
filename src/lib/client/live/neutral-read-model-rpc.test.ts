@@ -284,18 +284,22 @@ describe('read-model generic loss admission', () => {
     }).subscribe(scoped.lease.workspaceId, null, push, invalidated);
     return { ...s, current, invalidated, push, stop };
   }
-  it.each(
-    corpus.admission.filter(
-      (item: {
-        id: string;
-        lastGeneration?: string;
-        lease: { workspaceId: string; lossRecovery: number };
-      }) =>
-        !item.lastGeneration &&
-        item.lease?.workspaceId === scoped.lease.workspaceId &&
-        item.lease.lossRecovery === 1,
-    ),
-  )('canonical admission $id', async (entry) => {
+  const admissionCases: Array<{
+    id: string;
+    deliveryContext?: unknown;
+    frame: BackendNotification;
+    expected: 'ignore' | 'invalidate' | 'reject';
+  }> = corpus.admission.filter(
+    (item: {
+      id: string;
+      lastGeneration?: string;
+      lease: { workspaceId: string; lossRecovery: number };
+    }) =>
+      !item.lastGeneration &&
+      item.lease?.workspaceId === scoped.lease.workspaceId &&
+      item.lease.lossRecovery === 1,
+  );
+  it.each(admissionCases)('canonical admission $id', async (entry) => {
     const s = await registered();
     if (entry.id === 'retired-subscription') s.stop();
     if (entry.deliveryContext) s.current.mockReturnValue(false);

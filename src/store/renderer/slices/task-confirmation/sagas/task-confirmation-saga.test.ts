@@ -28,14 +28,14 @@ function run(options: { noCard?: boolean; fail?: boolean; hold?: boolean } = {})
     work: workReducer(undefined, { type: '@@INIT' }),
     taskConfirmation: taskConfirmationReducer(undefined, { type: '@@INIT' }),
   };
-  const reduce = (action: StoreAction) => {
+  const reduce = <Payload>(action: StoreAction<Payload>) => {
     state = {
       vcs: vcsReducer(state.vcs, action),
       work: workReducer(state.work, action),
       taskConfirmation: taskConfirmationReducer(state.taskConfirmation, action),
     };
   };
-  function send(action: StoreAction) {
+  function send<Payload>(action: StoreAction<Payload>) {
     reduce(action);
     channel.put(action);
   }

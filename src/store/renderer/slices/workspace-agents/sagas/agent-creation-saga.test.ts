@@ -37,7 +37,7 @@ import { store as appStore } from '../../../store';
 import { m } from '$shared/paraglide/messages.js';
 import type { AgentSession, Note, Workspace } from '$shared/types';
 import { AgentStatus } from '$shared/types';
-import { WorkspaceId } from '$shared/types/branded-ids';
+import { NoteId, WorkspaceId } from '$shared/types/branded-ids';
 import { createAgentTypeId } from '$shared/types/agent.types';
 import { agentSessionLaunchAgentRequested } from '../../agent-session/agent-session-slice';
 import { openAgentTabRequested } from '../../app-layout/app-layout-slice';
@@ -74,7 +74,7 @@ import type { StoreState } from '../../../types';
 
 const WS = 'ws-create-saga';
 const AGENT = 'agent-created';
-const NOTE = 'note-task-1';
+const NOTE = NoteId('note-task-1');
 const settle = async () => {
   await vi.dynamicImportSettled();
   await Promise.resolve();

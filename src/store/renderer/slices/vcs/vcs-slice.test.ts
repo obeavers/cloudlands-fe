@@ -56,11 +56,11 @@ describe('vcs projection reducer', () => {
     const next = vcsReducer(old, vcsCaptureStarted('ws', 'next'));
     expect(vcsReducer(next, vcsCaptureRetired('ws', 'capture'))).toBe(next);
   });
-  it.each([workspaceUnmounted, workspaceDeleted, removeWorkspaceEntity])(
+  it.each([workspaceUnmounted('ws'), workspaceDeleted('ws', []), removeWorkspaceEntity('ws')])(
     'clears workspace state on cleanup',
     (action) => {
       const state = vcsReducer(initialState, vcsCaptureStarted('ws', 'capture'));
-      expect(vcsReducer(state, action('ws')).byWorkspaceId).toEqual({});
+      expect(vcsReducer(state, action).byWorkspaceId).toEqual({});
     },
   );
 });

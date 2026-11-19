@@ -95,7 +95,7 @@ function setup(staleRequirement = false) {
   };
 }
 const confirmButton = () =>
-  screen.getByRole('button', { name: 'Confirm result', exact: true }) as HTMLButtonElement;
+  screen.getByRole('button', { name: 'Confirm result' }) as HTMLButtonElement;
 describe('server-derived completion revision association', () => {
   it('opens original work after lifecycle-only note revision changes without rebinding the original prose/evidence', async () => {
     const h = setup();
@@ -142,7 +142,7 @@ describe('server-derived completion revision association', () => {
     await waitFor(() =>
       expect(screen.queryByText('Explain the timeout and its recovery')).toBeNull(),
     );
-    expect(screen.queryByRole('button', { name: 'Confirm result', exact: true })).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Confirm result' })).toBeNull();
   });
   it('retains the actual post-decision receipt after completion advances the live note revision', async () => {
     const h = setup();

@@ -26,29 +26,26 @@ describe('task confirmation product card', () => {
         .disabled,
     ).toBe(true);
     expect(
-      (screen.getByRole('button', { name: 'Request changes', exact: true }) as HTMLButtonElement)
-        .disabled,
+      (screen.getByRole('button', { name: 'Request changes' }) as HTMLButtonElement).disabled,
     ).toBe(true);
     await fireEvent.input(screen.getByRole('textbox', { name: 'Reason' }), {
       target: { value: 'Cover interruption.' },
     });
     expect(h.onDraft).toHaveBeenCalledWith('Cover interruption.', false);
-    await fireEvent.click(screen.getByRole('button', { name: 'Confirm result', exact: true }));
+    await fireEvent.click(screen.getByRole('button', { name: 'Confirm result' }));
     expect(h.onDecide).toHaveBeenCalledWith('accept');
   });
   it('keeps stale and uncertain offers from deciding', async () => {
     const h = card('stale');
     expect(
-      (screen.getByRole('button', { name: 'Confirm result', exact: true }) as HTMLButtonElement)
-        .disabled,
+      (screen.getByRole('button', { name: 'Confirm result' }) as HTMLButtonElement).disabled,
     ).toBe(true);
     await fireEvent.click(screen.getByRole('button', { name: 'Refresh offer' }));
     expect(h.onRefresh).toHaveBeenCalledOnce();
     cleanup();
     card('uncertain');
     expect(
-      (screen.getByRole('button', { name: 'Confirm result', exact: true }) as HTMLButtonElement)
-        .disabled,
+      (screen.getByRole('button', { name: 'Confirm result' }) as HTMLButtonElement).disabled,
     ).toBe(true);
     expect(screen.queryByRole('button', { name: 'Refresh offer' })).toBeNull();
   });
@@ -64,7 +61,7 @@ describe('task confirmation product card', () => {
       card(scene);
       expect(screen.getByText('Task completion was not recorded')).toBeTruthy();
       expect(screen.getByText('Source adoption and publication were not requested.')).toBeTruthy();
-      expect(screen.queryByRole('button', { name: 'Confirm result', exact: true })).toBeNull();
+      expect(screen.queryByRole('button', { name: 'Confirm result' })).toBeNull();
     },
   );
 });

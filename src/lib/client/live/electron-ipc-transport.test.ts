@@ -25,7 +25,10 @@ function createFakeApi() {
   const listeners = new Map<string, Map<string, (payload: unknown) => void>>();
   let counter = 0;
   return {
-    invoke: vi.fn(async (_channel: string, _payload: unknown) => ({ ok: true, result: undefined })),
+    invoke: vi.fn(async (_channel: string, _payload: unknown): Promise<unknown> => ({
+      ok: true,
+      result: undefined,
+    })),
     on(channel: string, callback: (payload: unknown) => void): string {
       const id = `l${++counter}`;
       let channelListeners = listeners.get(channel);

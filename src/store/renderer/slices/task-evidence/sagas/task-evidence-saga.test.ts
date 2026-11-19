@@ -1,4 +1,5 @@
 import { runSaga } from 'redux-saga';
+import type { StoreAction } from '@themislib/themis/types';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { retainedRuns } from '../../../../../test/fixtures/task-run-evidence';
 const mocks = vi.hoisted(() => ({ supports: vi.fn(), read: vi.fn(), admission: 'original' }));
@@ -24,9 +25,9 @@ describe('one-shot evidence read ownership', () => {
   it('performs one bounded public read and returns the immutable response without updating notes or task status', async () => {
     mocks.read.mockResolvedValue(retainedRuns());
     const action = taskEvidenceReadRequested(input, 'original');
-    const emitted: unknown[] = [];
+    const emitted: StoreAction<unknown>[] = [];
     await runSaga(
-      { dispatch: (value) => emitted.push(value) },
+      { dispatch: (value: StoreAction<unknown>) => emitted.push(value) },
       readTaskRunEvidence,
       action,
     ).toPromise();
@@ -37,10 +38,10 @@ describe('one-shot evidence read ownership', () => {
     for (const supported of [false, true]) {
       mocks.supports.mockResolvedValue(supported);
       mocks.admission = supported ? 'replacement' : 'original';
-      const emitted: { type: string }[] = [];
+      const emitted: StoreAction<unknown>[] = [];
       const action = taskEvidenceReadRequested(input, 'original');
       await runSaga(
-        { dispatch: (value) => emitted.push(value) },
+        { dispatch: (value: StoreAction<unknown>) => emitted.push(value) },
         readTaskRunEvidence,
         action,
       ).toPromise();
@@ -54,9 +55,9 @@ describe('one-shot evidence read ownership', () => {
       return retainedRuns();
     });
     const action = taskEvidenceReadRequested(input, 'original');
-    const emitted: { type: string }[] = [];
+    const emitted: StoreAction<unknown>[] = [];
     await runSaga(
-      { dispatch: (value) => emitted.push(value) },
+      { dispatch: (value: StoreAction<unknown>) => emitted.push(value) },
       readTaskRunEvidence,
       action,
     ).toPromise();
