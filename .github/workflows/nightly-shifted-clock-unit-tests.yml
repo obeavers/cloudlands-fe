@@ -64,6 +64,7 @@ jobs:
       - name: Checkout shared transfer-selection fixtures
         uses: ./.github/actions/checkout-pinned
         with:
+          repository: obeavers/intent
           ref: main
           path: .cache/transfer-selection-contract
           sparse-checkout: |

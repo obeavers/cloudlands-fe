@@ -146,7 +146,7 @@ class EventPolicy(unittest.TestCase):
         # first (the documented fix order) stay invisible until a hand bump
         # (intentd#2476). @main resolves the monorepo tip per run.
         caller = self.workflow['jobs']['monorepo-consumer-checks']
-        self.assertEqual(caller['uses'], 'intent-hq/intent/.github/workflows/consumer-checks.yml@main')
+        self.assertEqual(caller['uses'], 'obeavers/intent/.github/workflows/consumer-checks.yml@main')
 
     def test_gate_rejects_failed_cancelled_missing_and_required_skips(self):
         for event in ('pull_request', 'merge_group'):

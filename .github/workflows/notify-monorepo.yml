@@ -1,4 +1,4 @@
-# Notifies intent-hq/intent (the monorepo) on push to main so its auto-bump-submodules
+# Notifies this owner's intent monorepo on push to main so its auto-bump-submodules
 # workflow can advance the submodule pin immediately (the cron run backstops
 # any missed dispatch). Fail-soft by design: never fails the run.
 name: Notify monorepo
@@ -13,19 +13,20 @@ jobs:
   notify:
     runs-on: ubuntu-24.04
     steps:
-      - name: Send repository_dispatch to intent-hq/intent
+      - name: Send repository_dispatch to the owner's monorepo
         env:
           GH_TOKEN: ${{ secrets.MONOREPO_DISPATCH_TOKEN }}
           REPO: ${{ github.repository }}
           SHA: ${{ github.sha }}
+          MONOREPO_REPO: ${{ github.repository_owner }}/intent
         run: |
           if [ -z "$GH_TOKEN" ]; then
             echo "::warning::MONOREPO_DISPATCH_TOKEN secret is not set; skipping monorepo notification"
             exit 0
           fi
-          if ! gh api repos/intent-hq/intent/dispatches \
+          if ! gh api "repos/$MONOREPO_REPO/dispatches" \
             -f event_type=submodule-update \
             -f "client_payload[repo]=$REPO" \
             -f "client_payload[sha]=$SHA"; then
-            echo "::warning::repository_dispatch to intent-hq/intent failed; the cron run will pick up the bump"
+            echo "::warning::repository_dispatch to $MONOREPO_REPO failed; the cron run will pick up the bump"
           fi
