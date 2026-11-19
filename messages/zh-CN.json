@@ -9307,5 +9307,10 @@
   "experimental_memory_lesson_label": "经验",
   "experimental_memory_constraint_label": "约束",
   "experimental_memory_preference_label": "偏好",
-  "experimental_memory_context_label": "上下文"
+  "experimental_memory_context_label": "上下文",
+  "ui_shortcuts_recentAgents_label": "切换到最近的智能体",
+  "recentAgents_switcher_ariaLabel": "最近的智能体",
+  "recentAgents_switcher_untitled_label": "未命名智能体",
+  "recentAgents_switcher_offlineMachine_label": "{machine} · 离线",
+  "recentAgents_switcher_statusTime_label": "{status} · {time}"
 }

@@ -4,6 +4,48 @@
 
 From version 2.0.0 onward, release notes are published on the [GitHub Releases page](https://github.com/intent-hq/cloudlands-releases/releases). Auto-generated entries for 2.x releases also appear below.
 
+## [2.357.1](https://github.com/intent-hq/cloudlands-fe/compare/v2.357.0...v2.357.1) (2026-11-19)
+
+
+### 🐛 Bug Fixes
+
+* bump intentd sidecar to v0.11.252 ([#4798](https://github.com/intent-hq/cloudlands-fe/issues/4798)) ([e2c7f87](https://github.com/intent-hq/cloudlands-fe/commit/e2c7f87b38d77b0bf3a66976a8d29a9412b4370c))
+
+## [2.357.0](https://github.com/intent-hq/cloudlands-fe/compare/v2.356.0...v2.357.0) (2026-11-19)
+
+
+### 🚀 Features
+
+* **lint:** type-check renderer unit tests against an error baseline ([#4788](https://github.com/intent-hq/cloudlands-fe/issues/4788)) ([2069c13](https://github.com/intent-hq/cloudlands-fe/commit/2069c138a3c1ba2e278993620194aaabf6def0c6))
+* open web links in Intent's browser panel when INTENT_NO_SYSTEM_BROWSER=1 ([#4789](https://github.com/intent-hq/cloudlands-fe/issues/4789)) ([e221a48](https://github.com/intent-hq/cloudlands-fe/commit/e221a48a474ea6c31cfb8a9dbaf9ab8adc3a3d49))
+* **verify-changed:** name the full component suite trigger and add --skip-ct-full ([#4787](https://github.com/intent-hq/cloudlands-fe/issues/4787)) ([3a7d8de](https://github.com/intent-hq/cloudlands-fe/commit/3a7d8deec5c6915986d5039c0a65cc00f6e49eac))
+
+
+### 🐛 Bug Fixes
+
+* bump intentd sidecar to v0.11.251 ([#4797](https://github.com/intent-hq/cloudlands-fe/issues/4797)) ([b657335](https://github.com/intent-hq/cloudlands-fe/commit/b657335a93718ec11a5afbca03aa2ce5b3c2578a))
+
+## [2.356.0](https://github.com/intent-hq/cloudlands-fe/compare/v2.355.2...v2.356.0) (2026-11-19)
+
+
+### 🚀 Features
+
+* add a recent-agent switcher (Option+Tab, Super+Tab on Linux) ([#4783](https://github.com/intent-hq/cloudlands-fe/issues/4783)) ([4cc8559](https://github.com/intent-hq/cloudlands-fe/commit/4cc8559345a812ec4b808137f7bb20528c848d2b))
+
+## [2.355.2](https://github.com/intent-hq/cloudlands-fe/compare/v2.355.1...v2.355.2) (2026-11-19)
+
+
+### 🐛 Bug Fixes
+
+* bump intentd sidecar to v0.11.250 ([#4784](https://github.com/intent-hq/cloudlands-fe/issues/4784)) ([6d83f13](https://github.com/intent-hq/cloudlands-fe/commit/6d83f13346a098c368f7f52c795e73f22dfcb27f))
+
+## [2.355.1](https://github.com/intent-hq/cloudlands-fe/compare/v2.355.0...v2.355.1) (2026-11-19)
+
+
+### 🐛 Bug Fixes
+
+* paste a plain one-line copy inline in the composer ([#4781](https://github.com/intent-hq/cloudlands-fe/issues/4781)) ([87be2c8](https://github.com/intent-hq/cloudlands-fe/commit/87be2c809709a72ecc0c7d1e9fa35ed81d5be9ef))
+
 ## [2.355.0](https://github.com/intent-hq/cloudlands-fe/compare/v2.354.1...v2.355.0) (2026-11-19)
 
 

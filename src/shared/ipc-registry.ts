@@ -680,6 +680,11 @@ export const IPC_CHANNELS = {
     LIST_TABS_RESPONSE: 'browser:list-tabs-response',
     /** Open a browser tab in a panel - main->renderer event */
     OPEN_TAB: 'browser:open-tab',
+    /**
+     * Open a web link in a browser panel of the workspace the window shows,
+     * instead of the system browser (INTENT_NO_SYSTEM_BROWSER) - main->renderer event
+     */
+    OPEN_LINK: 'browser:open-link',
     /** A tab's registration timed out: log this window's view of it (intent-hq/intent#7855) - main->renderer event */
     DIAGNOSE_TAB: 'browser:diagnose-tab',
     /** Close a browser tab in a panel - main->renderer event */
@@ -1151,6 +1156,22 @@ export const IPC_CHANNELS = {
   // left rail switches which machine's renderer the window shows. Main owns
   // the per-window list and selection; CHANGED is a main→renderer push (also
   // in EVENT_CHANNELS). Types: `shared/types/machine-rail.ts`.
+  // Recent agents: the app-wide list of opened agent conversations behind the
+  // recent-agent switcher. Main owns and persists it; CHANGED is a main→renderer
+  // push of the whole list (also in EVENT_CHANNELS). Types: `shared/recent-agents.ts`.
+  RECENT_AGENTS: {
+    LIST: 'recent-agents:list',
+    RECORD: 'recent-agents:record',
+    FORGET_WORKSPACE: 'recent-agents:forget-workspace',
+    CHANGED: 'recent-agents:changed',
+    // Main → renderer: the switcher chord, or the release of its modifier, pressed
+    // in a page of the browser panel, whose keys never reach the app's document
+    // (also in EVENT_CHANNELS).
+    PAGE_KEY: 'recent-agents:page-key',
+    // Renderer → main: the switcher's effective binding, so main forwards that
+    // chord (not only the default) from browser-panel pages.
+    SET_PAGE_CHORD: 'recent-agents:set-page-chord',
+  },
   MACHINE_RAIL: {
     GET_STATE: 'machine-rail:get-state',
     SELECT: 'machine-rail:select',
@@ -1289,6 +1310,8 @@ export const EVENT_CHANNELS = [
   'window:dock-shown',
   'window:dock-lab-changed',
   'machine-rail:changed',
+  'recent-agents:changed',
+  'recent-agents:page-key',
   'machine-rail:toast',
   'machine-rail:backdrop-changed',
   'window:dock-backend-switch-failed',
@@ -1445,6 +1468,8 @@ export const EVENT_CHANNELS = [
   'browser:agent-drawing',
   // Browser tab open request from main process (agent wants to open a browser tab)
   'browser:open-tab',
+  // Web link open request from main process (no system browser: Intent OS)
+  'browser:open-link',
   // A tab's registration timed out; the renderer logs its view of the tab (intent-hq/intent#7855)
   'browser:diagnose-tab',
   // Browser tab close request from main process (agent wants to close a browser tab)

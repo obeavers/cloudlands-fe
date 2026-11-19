@@ -104,6 +104,7 @@ import { panelLayoutSaga } from './slices/panel-layout/sagas/panel-layout-saga';
 import { permissionResponseSaga } from './slices/permission/sagas/permission-response-saga';
 import { powerSaga } from './slices/power/sagas/power-saga';
 import { machineRailSaga } from './slices/machine-rail/sagas/machine-rail-saga';
+import { recentAgentsSaga } from './slices/recent-agents/sagas/recent-agents-saga';
 import { proposalLifecycleSaga } from './slices/proposal-lifecycle/sagas/proposal-lifecycle-saga';
 import { questionUiPersistenceSaga } from './slices/question-ui/sagas/question-ui-persistence-saga';
 import { secretRequestsSaga } from './slices/secret-requests/sagas/secret-requests-saga';
@@ -249,6 +250,7 @@ export const sagas = [
   themeSaga,
   powerSaga,
   machineRailSaga,
+  recentAgentsSaga,
   autoUpdateSaga,
   specialistsSaga,
   workspaceCatalogSaga,

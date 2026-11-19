@@ -9307,5 +9307,10 @@
   "experimental_memory_lesson_label": "Erkenntnis",
   "experimental_memory_constraint_label": "Einschränkung",
   "experimental_memory_preference_label": "Präferenz",
-  "experimental_memory_context_label": "Kontext"
+  "experimental_memory_context_label": "Kontext",
+  "ui_shortcuts_recentAgents_label": "Zu letztem Agenten wechseln",
+  "recentAgents_switcher_ariaLabel": "Letzte Agenten",
+  "recentAgents_switcher_untitled_label": "Unbenannter Agent",
+  "recentAgents_switcher_offlineMachine_label": "{machine} · Nicht verbunden",
+  "recentAgents_switcher_statusTime_label": "{status} · {time}"
 }

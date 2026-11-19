@@ -363,6 +363,10 @@ import { getNotificationService } from '../features/notifications/main/notificat
 import { setupRulesIPC } from '../features/rules/main/rules.ipc';
 import { setupAutoUpdateIPC } from '../features/auto-update/main/auto-update.ipc';
 import { setupReleaseNotesIPC } from '../features/release-notes/main/release-notes.ipc';
+import {
+  setupRecentAgentPageKeys,
+  setupRecentAgentsIPC,
+} from '../features/recent-agents/main/recent-agents.ipc';
 import { isInstallingUpdate } from '../features/auto-update/main/auto-update.service';
 import {
   registerBackendHandlers,
@@ -444,7 +448,8 @@ import {
 import { handlePairDeepLink, routePairLinkFromOs } from '../features/deeplink/main/pair-deep-link';
 import { scrubToken } from '../features/deeplink/utils/scrub-token';
 import { findIntentUrl } from '../features/deeplink/utils/find-intent-url';
-import { findOpenUrlArg, openSignInWindow } from '../features/browser/main/sign-in-window';
+import { findOpenUrlArg } from '../features/browser/main/sign-in-window';
+import { openWebUrlFromOs } from './open-external';
 import { isInviteUri } from '../shared/utils/invite-uri';
 import { isMainOnlyLinkUri } from '../shared/utils/node-invite-uri';
 import { registerChatExportHandlers } from '../features/export/main/export.ipc';
@@ -704,6 +709,7 @@ const bootFlow = app.whenReady().then(async () => {
   // SECURITY: Setup webview security handlers early, before any windows are created
   setupWebviewSecurity();
   setupMetaClipboardShortcuts();
+  setupRecentAgentPageKeys();
 
   // WebHID handlers for the hardware console (silent grant for supported
   // Work Louder devices) — must be registered before any windows exist.
@@ -1683,6 +1689,7 @@ const bootFlow = app.whenReady().then(async () => {
   await setupWorkspaceRulesIPC(configManager || undefined); // Needed for initial agent system prompt
   setupAutoUpdateIPC(); // Needed for auto-update IPC on startup
   setupReleaseNotesIPC(); // Needed for the Help ▸ Show Release Notes fetch
+  setupRecentAgentsIPC(); // Needed for the recent-agent switcher in every window
 
   // The daemon owns PATH discovery. Seed only after starting/adopting it (at
   // the top of this phase), and retry briefly while a newly spawned sidecar
@@ -2223,7 +2230,7 @@ if (!gotTheLock) {
     // A web page sent from the OS (Intent OS routes xdg-open here).
     const webUrl = findOpenUrlArg(commandLine);
     if (webUrl) {
-      openSignInWindow(webUrl);
+      await openWebUrlFromOs(webUrl);
       return;
     }
 

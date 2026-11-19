@@ -9307,5 +9307,10 @@
   "experimental_memory_lesson_label": "교훈",
   "experimental_memory_constraint_label": "제약",
   "experimental_memory_preference_label": "선호",
-  "experimental_memory_context_label": "컨텍스트"
+  "experimental_memory_context_label": "컨텍스트",
+  "ui_shortcuts_recentAgents_label": "최근 에이전트로 전환",
+  "recentAgents_switcher_ariaLabel": "최근 에이전트",
+  "recentAgents_switcher_untitled_label": "제목 없는 에이전트",
+  "recentAgents_switcher_offlineMachine_label": "{machine} · 오프라인",
+  "recentAgents_switcher_statusTime_label": "{status} · {time}"
 }
