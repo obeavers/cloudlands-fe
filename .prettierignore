@@ -53,3 +53,6 @@ cdp-mcp-server/dist/
 *.gif
 *.bmp
 *.webp
+
+# Canonical protocol corpus: retain upstream bytes; its recorded SHA is tested.
+src/lib/client/live/__fixtures__/event-stream-recovery.json

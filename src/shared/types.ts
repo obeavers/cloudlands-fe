@@ -1,5 +1,6 @@
 import type { AgentPlacement, AgentPlacementRequest } from './types/agent-node';
 import type { WorkspaceHome } from './types/workspace-home';
+import type { TaskWorkDefinition } from './types/work';
 /**
  * Unified Type Definitions
  *
@@ -1025,6 +1026,7 @@ export interface TaskMetadata {
   status: TaskStatus;
   assignedAgentIds?: AgentId[]; // Phase 1C: Agents working on this task
   acceptanceCriteria?: string[];
+  workDefinition?: TaskWorkDefinition;
   estimatedEffort?: string;
   actualEffort?: string;
   blockedReason?: string;

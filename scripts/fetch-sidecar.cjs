@@ -22,6 +22,7 @@
  * Idempotent: a stamp file (resources/sidecar/.intentd-fetch-stamp.json) records what
  * was staged; matching version+target+staged-binary-hash skips the download.
  */
+const atomicHost = require('./atomic-host-payload.cjs');
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
@@ -175,7 +176,8 @@ async function main() {
       stamp?.target === target &&
       // Guard against a corrupted/partial staged binary: only skip when it still
       // hashes to what was staged. Old stamps without binSha256 re-fetch once.
-      stamp?.binSha256 === lib.sha256Hex(fs.readFileSync(destBin))
+      stamp?.binSha256 === lib.sha256Hex(fs.readFileSync(destBin)) &&
+      atomicHost.stampMatches(DEST_DIR, target, stamp?.atomicHost)
     ) {
       console.log(
         `intentd ${version} (${target}) already staged at ${destBin} — skipping (use --force to re-fetch)`,
@@ -243,6 +245,11 @@ async function main() {
     fs.mkdirSync(DEST_DIR, { recursive: true });
     fs.copyFileSync(extractedBin, destBin);
     if (process.platform !== 'win32') fs.chmodSync(destBin, 0o755);
+    const stagedHost = atomicHost.stagePayload(
+      atomicHost.payloadDirectory(path.dirname(extractedBin)),
+      DEST_DIR,
+      target,
+    );
     fs.writeFileSync(
       STAMP_FILE,
       `${JSON.stringify(
@@ -252,6 +259,7 @@ async function main() {
           asset: assetName,
           sha256: actual,
           binSha256: lib.sha256Hex(fs.readFileSync(destBin)),
+          atomicHost: stagedHost,
           fetchedAt: new Date().toISOString(),
         },
         null,

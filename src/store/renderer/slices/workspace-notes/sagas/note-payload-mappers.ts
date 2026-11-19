@@ -22,6 +22,18 @@ function copyTask(task: TaskMetadata): TaskMetadata {
     status: task.status,
     ...(task.assignedAgentIds ? { assignedAgentIds: [...task.assignedAgentIds] } : {}),
     ...(task.acceptanceCriteria ? { acceptanceCriteria: [...task.acceptanceCriteria] } : {}),
+    ...(task.workDefinition
+      ? {
+          workDefinition: {
+            purpose: task.workDefinition.purpose,
+            criteria: task.workDefinition.criteria.map((criterion) => ({
+              ...criterion,
+              requiredKinds: [...criterion.requiredKinds],
+            })),
+            files: task.workDefinition.files.map((file) => ({ ...file })),
+          },
+        }
+      : {}),
     ...(task.estimatedEffort !== undefined ? { estimatedEffort: task.estimatedEffort } : {}),
     ...(task.actualEffort !== undefined ? { actualEffort: task.actualEffort } : {}),
     ...(task.blockedReason !== undefined ? { blockedReason: task.blockedReason } : {}),

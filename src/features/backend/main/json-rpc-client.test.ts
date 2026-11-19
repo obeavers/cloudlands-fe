@@ -56,6 +56,66 @@ describe('JsonRpcClient', () => {
     vi.useRealTimers();
   });
 
+  it('carries an opt-in trace as the JSON-RPC id while retaining numeric and reverse-call correlation', async () => {
+    const traceId = 'latency-12345678-1234-1234-1234-123456789abc';
+    const { client, socket } = makeClient();
+    client.registerMethod('reverse.probe', () => ({ ok: true }));
+    client.start();
+    socket.open();
+    try {
+      const traced = client.request('workspace.list', { filter: 'active' }, { traceId });
+      const ordinary = client.request('host.status');
+      expect(JSON.parse(socket.writes[0])).toEqual({
+        jsonrpc: '2.0',
+        id: traceId,
+        method: 'workspace.list',
+        params: { filter: 'active' },
+      });
+      expect(JSON.parse(socket.writes[1])).toEqual({
+        jsonrpc: '2.0',
+        id: 1,
+        method: 'host.status',
+      });
+      socket.receive('{"jsonrpc":"2.0","id":"rev-1","method":"reverse.probe","params":{}}\n');
+      socket.receive('{"jsonrpc":"2.0","id":"1","result":{"ready":true}}\n');
+      socket.receive(
+        `${JSON.stringify({ jsonrpc: '2.0', id: traceId, result: { workspaces: [] } })}\n`,
+      );
+      await expect(traced).resolves.toEqual({ workspaces: [] });
+      await expect(ordinary).resolves.toEqual({ ready: true });
+      await vi.waitFor(() =>
+        expect(socket.writes.map((s) => JSON.parse(s))).toContainEqual({
+          jsonrpc: '2.0',
+          id: 'rev-1',
+          result: { ok: true },
+        }),
+      );
+    } finally {
+      client.dispose();
+    }
+  });
+
+  it('keeps a traced timeout and late response from settling another numeric request', async () => {
+    vi.useFakeTimers();
+    const traceId = 'latency-12345678-1234-1234-1234-123456789abc';
+    const { client, socket } = makeClient();
+    client.start();
+    socket.open();
+    try {
+      const failed = client.request('workspace.list', {}, { traceId }).catch((error) => error);
+      await vi.advanceTimersByTimeAsync(1000);
+      expect(await failed).toBeInstanceOf(Error);
+      const ordinary = client.request('host.status');
+      socket.receive(
+        `${JSON.stringify({ jsonrpc: '2.0', id: traceId, result: { wrong: true } })}\n`,
+      );
+      socket.receive('{"jsonrpc":"2.0","id":1,"result":{"ready":true}}\n');
+      await expect(ordinary).resolves.toEqual({ ready: true });
+    } finally {
+      client.dispose();
+    }
+  });
+
   it.each(['remoteMachines.add', 'remoteMachines.claim'])(
     'never shows %s params (token or node link) to traffic observers',
     async (method) => {
@@ -1867,6 +1927,8 @@ describe('captured repository socket dispatch', () => {
           rawScreenshotRetention: 1,
           chiefAttachments: 1,
           noteTruncatedRead: 1,
+          taskPlanning: 1,
+          taskEvidenceRead: 1,
           remoteMachines: 1,
           remoteLinkTraffic: 1,
           remoteMachineClaim: 0,
@@ -1884,6 +1946,8 @@ describe('captured repository socket dispatch', () => {
       rawScreenshotRetention: 1,
       chiefAttachments: 1,
       noteTruncatedRead: 1,
+      taskPlanning: 1,
+      taskEvidenceRead: 1,
       remoteMachines: 1,
       remoteLinkTraffic: 1,
       remoteMachineClaim: 0,
@@ -1911,6 +1975,8 @@ describe('captured repository socket dispatch', () => {
       rawScreenshotRetention: 0,
       chiefAttachments: 0,
       noteTruncatedRead: 0,
+      taskPlanning: 0,
+      taskEvidenceRead: 0,
       remoteMachines: 0,
       remoteLinkTraffic: 0,
       remoteMachineClaim: 0,

@@ -43,6 +43,7 @@ import {
 } from '../../workspace/workspace-selectors';
 import { selectGitHubAuthIsAuthenticated } from '../../github-auth/github-auth-selectors';
 import { selectNoteById } from '../../workspace-notes/workspace-notes-selectors';
+import { selectPrincipalActionContext } from '../../principal/principal-selectors';
 import { setChiefActiveAgentId } from '../../sidebar-nav/sidebar-nav-slice';
 import { createChiefVirtualWorkspace } from '../chief-virtual-workspace';
 import {
@@ -320,19 +321,51 @@ function* createManualAgent(
 function* runAgentForNote(
   action: ReturnType<typeof runAgentForNoteRequested>,
 ): SagaGenerator<void> {
-  const [wsId, noteId, noteTitle] = action.payload;
+  const [wsId, noteId, noteTitle, expectedTaskRevision, expectedAdmission] = action.payload;
+  const admission = expectedTaskRevision
+    ? (expectedAdmission ?? (yield* selectPrincipalActionContext.effect()))
+    : null;
+  if (
+    expectedTaskRevision &&
+    (!admission || admission !== (yield* selectPrincipalActionContext.effect()))
+  ) {
+    yield* call(showCreationError, new Error(m.task_plan_stale_error()));
+    return;
+  }
   if (yield* call(refusedForCollaborator, wsId)) return;
   const workspace = yield* call(validateWorkspace, wsId);
   if (!workspace) return;
   let note = yield* selectNoteById.effect(wsId, noteId);
   if (!note) return;
-  // Slim note.list rows carry no content (§5.2) — the initial message embeds
-  // the task body, so fetch the full note before building it. Fail-soft: on a
-  // fetch failure keep the cached row (the agent can still ws.note.read it).
-  // A truncated view read (§5.2) holds only a prefix — re-read the whole note too.
-  if (isNoteContentStale(note) || note.contentTruncated) {
-    const full = yield* call([appClient.notes, appClient.notes.get], noteId, wsId);
-    if (full && String(full.workspaceId) === wsId) note = full;
+  // Confirmed runs always read canonical source: optimistic edits may retain
+  // the old rev in the cache. Only legacy runs may fall back to cached content.
+  // Slim/truncated rows also need the complete body for their initial message.
+  if (expectedTaskRevision || isNoteContentStale(note) || note.contentTruncated) {
+    try {
+      const full = yield* call([appClient.notes, appClient.notes.get], noteId, wsId);
+      if (full && String(full.workspaceId) === wsId && full.id === noteId) note = full;
+      else if (expectedTaskRevision) {
+        yield* call(showCreationError, new Error(m.task_plan_stale_error()));
+        return;
+      }
+    } catch (error) {
+      if (expectedTaskRevision) {
+        yield* call(showCreationError, error);
+        return;
+      }
+    }
+  }
+  if (
+    expectedTaskRevision &&
+    (expectedTaskRevision.workspaceId !== wsId ||
+      expectedTaskRevision.noteId !== noteId ||
+      expectedTaskRevision.rev !== note.rev ||
+      admission !== (yield* selectPrincipalActionContext.effect()) ||
+      isNoteContentStale(note) ||
+      note.contentTruncated)
+  ) {
+    yield* call(showCreationError, new Error(m.task_plan_stale_error()));
+    return;
   }
   // Daemon `specialists.default` setting wins when it resolves to a pickable
   // specialist — visibility-gated by selectSpecialists (e.g. GitHub-dependent
@@ -374,6 +407,7 @@ function* runAgentForNote(
       name: noteTitle || m.agent_creation_taskAgent_name(),
       nameExplicitlySet: false,
       workspaceId: WorkspaceId(wsId),
+      expectedTaskRevision,
       // Resolved-model catalog values are previews only. When the specialist
       // has no explicit model, omit it so the daemon resolves in this provider.
       model: pinned?.modelId || undefined,

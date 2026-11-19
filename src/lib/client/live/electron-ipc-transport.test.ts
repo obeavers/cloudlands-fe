@@ -15,6 +15,7 @@ import {
   createElectronIpcBackendTransport,
   inspectChannelFanoutSubscribers,
 } from './electron-ipc-transport';
+import { beginLatencyRequest } from './latency-recorder';
 
 const STATUS = IPC_CHANNELS.BACKEND.STATUS;
 const NOTIFICATION = IPC_CHANNELS.BACKEND.NOTIFICATION;
@@ -54,8 +55,46 @@ function installFakeApi() {
 }
 
 afterEach(() => {
+  window.__INTENT_LATENCY__?.stop();
+  window.__INTENT_LATENCY__?.clear();
   delete (window as unknown as { electronAPI?: unknown }).electronAPI;
   vi.restoreAllMocks();
+});
+
+describe('opt-in Electron request timings', () => {
+  it('sends only IPC metadata and preserves the daemon-owned result', async () => {
+    const api = installFakeApi();
+    let now = 0;
+    vi.spyOn(performance, 'now').mockImplementation(() => now);
+    api.invoke.mockImplementation(async (_channel, payload) => {
+      now = 12;
+      const { traceId } = payload as { traceId: string };
+      return {
+        ok: true,
+        result: { workspaces: [] },
+        latency: { traceId, mainDurationMs: 8, rpcDurationMs: 6 },
+      };
+    });
+    beginLatencyRequest('workspace.list');
+    window.__INTENT_LATENCY__!.start();
+    const transport = createElectronIpcBackendTransport();
+    await expect(transport.request('workspace.list', { filter: 'active' })).resolves.toEqual({
+      workspaces: [],
+    });
+    expect(api.invoke).toHaveBeenCalledWith(IPC_CHANNELS.BACKEND.REQUEST, {
+      method: 'workspace.list',
+      params: { filter: 'active' },
+      traceId: expect.stringMatching(/^latency-/),
+    });
+    expect(
+      window.__INTENT_LATENCY__!.snapshot().samples.map((s) => [s.phase, s.durationMs]),
+    ).toEqual([
+      ['request', 12],
+      ['main', 8],
+      ['ipc-overhead', 4],
+      ['rpc', 6],
+    ]);
+  });
 });
 
 describe('electron-ipc-transport onReconnected fan-out', () => {

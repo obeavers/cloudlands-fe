@@ -1034,6 +1034,70 @@ describe('agentCreationSaga', () => {
     await task.toPromise();
   });
 
+  it('forwards a confirmed task pin through the task-run factory and refuses changed source before launching', async () => {
+    mocks.createAgent.mockResolvedValue({ success: true, agent: session(), agentId: AGENT });
+    const current = state();
+    const note = current.workspaceNotes.byWorkspaceId[WS].notes.map[NOTE];
+    note.rev = 7;
+    note.content = 'Unsaved optimistic draft';
+    const get = vi
+      .spyOn(appClient.notes, 'get')
+      .mockResolvedValue({ ...note, workspaceId: WS, content: 'Confirmed canonical body' } as Note);
+    const expectedTaskRevision = {
+      workspaceId: WS,
+      noteId: NOTE,
+      rev: 7,
+      digest: 'retained-source',
+      projectionSchemaVersion: 1 as const,
+    };
+    const { channel, task } = start(() => current);
+    channel.put(runAgentForNoteRequested(WS, NOTE, 'Task note', expectedTaskRevision));
+    await settle();
+    expect(mocks.createAgent).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({
+        expectedTaskRevision,
+        initialMessage: expect.stringContaining('Confirmed canonical body'),
+        metadata: expect.objectContaining({ taskNoteId: NOTE }),
+      }),
+    );
+    mocks.createAgent.mockClear();
+    note.rev = 8;
+    get.mockResolvedValue({ ...note, workspaceId: WS } as Note);
+    channel.put(runAgentForNoteRequested(WS, NOTE, 'Task note', expectedTaskRevision));
+    await settle();
+    expect(mocks.createAgent).not.toHaveBeenCalled();
+    expect(mocks.toastError).toHaveBeenCalled();
+    task.cancel();
+    await task.toPromise();
+    get.mockRestore();
+  });
+
+  it('refuses a confirmed run when canonical source cannot be read and keeps the watcher alive', async () => {
+    const current = state();
+    current.workspaceNotes.byWorkspaceId[WS].notes.map[NOTE].rev = 7;
+    const get = vi
+      .spyOn(appClient.notes, 'get')
+      .mockRejectedValue(new Error('canonical read unavailable'));
+    const { channel, task } = start(() => current);
+    channel.put(
+      runAgentForNoteRequested(WS, NOTE, 'Task note', {
+        workspaceId: WS,
+        noteId: NOTE,
+        rev: 7,
+        digest: 'confirmed',
+        projectionSchemaVersion: 1,
+      }),
+    );
+    await settle();
+    expect(mocks.createAgent).not.toHaveBeenCalled();
+    expect(mocks.toastError).toHaveBeenCalled();
+    expect(task.isRunning()).toBe(true);
+    task.cancel();
+    await task.toPromise();
+    get.mockRestore();
+  });
+
   it('passes a pinned specialist reasoning effort through the task-run path', async () => {
     mocks.createAgent.mockResolvedValue({ success: true, agent: session(), agentId: AGENT });
     const pinned: FileSpecialist = {

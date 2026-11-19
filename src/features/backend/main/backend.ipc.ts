@@ -1,3 +1,4 @@
+import { withBackendRequestLatency } from './request-latency';
 import { createAuthorizedIpcHandler } from '../../../main/ipc-authorization';
 import { getStrictBackendBindingForWebContents } from '../../../main/window-backend';
 import type { SharedDraft } from '../../../shared/types/chat-draft-sync';
@@ -73,6 +74,7 @@ import { createRepositoryResourceFeed } from './repository-resource-feed';
 import { createRepositoryCheckoutFeed } from './repository-checkout-feed';
 import { registerRepositoryCheckoutHandlers } from './repository-checkout-lifecycle';
 import { registerPrMonitorHandlers } from './pr-monitor-lifecycle';
+import { registerNeutralWorkspaceHandlers } from './neutral-workspace-lifecycle';
 import { registerRepositoryResourceHandlers } from './repository-resource-lifecycle';
 import { createRepositoryAuthorityFeed } from './repository-authority-feed';
 import { createRepositorySelectionFeed } from './repository-selection-feed';
@@ -595,6 +597,7 @@ const resourceFeeds = new WeakMap<JsonRpcClient, ReturnType<typeof createReposit
 const checkoutFeeds = new WeakMap<JsonRpcClient, ReturnType<typeof createRepositoryCheckoutFeed>>();
 let checkoutRoutes: ReturnType<typeof registerRepositoryCheckoutHandlers> | undefined;
 let prMonitorRoutes: ReturnType<typeof registerPrMonitorHandlers> | undefined;
+let neutralWorkspaceRoutes: ReturnType<typeof registerNeutralWorkspaceHandlers> | undefined;
 let resourceRoutes: ReturnType<typeof registerRepositoryResourceHandlers> | undefined;
 const selectionFeeds = new WeakMap<
   JsonRpcClient,
@@ -1000,6 +1003,7 @@ function retireOriginalMember(
   try {
     repositoryRoutes?.retireBackend(member.id);
     resourceRoutes?.retireBackend(member.id);
+    neutralWorkspaceRoutes?.retireBackend(member.id);
     prMonitorRoutes?.retireBackend(member.id);
     checkoutRoutes?.retireBackend(member.id);
     selectionRoutes?.retireBackend(member.id);
@@ -1187,6 +1191,7 @@ export function enrollBackendClientLifecycle(observer?: (event: PoolObservation)
         if (process.platform === 'darwin') poolAuxiliary('keychain-engine');
         repositoryRoutes?.dispose();
         resourceRoutes?.dispose();
+        neutralWorkspaceRoutes?.dispose();
         prMonitorRoutes?.dispose();
         checkoutRoutes?.dispose();
         selectionRoutes?.dispose();
@@ -1837,6 +1842,7 @@ export function disconnectBackendClient(id: string): void {
   if (!instance) return;
   repositoryRoutes?.retireBackend(id);
   resourceRoutes?.retireBackend(id);
+  neutralWorkspaceRoutes?.retireBackend(id);
   prMonitorRoutes?.retireBackend(id);
   checkoutRoutes?.retireBackend(id);
   selectionRoutes?.retireBackend(id);
@@ -4812,6 +4818,9 @@ export function registerBackendHandlers(): void {
     readBackend: (id) => backendClients.get(id),
     errorPayload: toErrorPayload,
   });
+  neutralWorkspaceRoutes = registerNeutralWorkspaceHandlers(ipcMain, {
+    readBackend: (id) => backendClients.get(id),
+  });
   resourceRoutes = registerRepositoryResourceHandlers(ipcMain, {
     readBackend: (id) => backendClients.get(id),
     capture: (client, connection, workspaceId) => {
@@ -4830,125 +4839,137 @@ export function registerBackendHandlers(): void {
 
   ipcMain.handle(
     BACKEND.REQUEST,
-    async (
-      event,
-      payload: {
-        method?: string;
-        params?: unknown;
-        timeoutMs?: number;
-        localMachine?: boolean;
-        reviewMonitoring?: unknown;
-      },
-    ) => {
-      const method = payload?.method;
-      if (typeof method !== 'string' || method.length === 0) {
-        return { ok: false, error: { code: 'INVALID_PARAMS', message: 'method is required' } };
-      }
-      if (method === DRAFT_SYNC_METHOD) return sharedDraftRequest(event, payload);
-      if (
-        method.startsWith('sourceControl.read.') ||
-        method.startsWith('sourceControl.checkout.') ||
-        method === 'workspace.repositoryContext' ||
-        method === 'workspace.repositoryContext.capture' ||
-        method === 'workspace.repositoryContext.release' ||
-        method === 'workspace.repositorySelection.capture' ||
-        method === 'workspace.repositorySelection.save' ||
-        method === 'workspace.repositorySelection.reset' ||
-        method === 'workspace.repositorySelection.reconcile' ||
-        method === 'workspace.repositorySelection.release' ||
-        method === 'accept-changes.reconcile' ||
-        method === 'accept-changes.release' ||
-        ((method === 'accept-changes.prepare' || method === 'accept-changes.execute') &&
-          payload.params !== null &&
-          typeof payload.params === 'object' &&
-          Object.prototype.hasOwnProperty.call(payload.params, 'review'))
-      ) {
-        return {
-          ok: false,
-          // i18n-ignore (internal route diagnostic; facade emits a typed unavailable state)
-          error: { code: 'REPOSITORY_ROUTE_UNAVAILABLE', message: 'Repository route required' },
-        };
-      }
-      if (
-        method === 'workspace.create' &&
-        payload.params !== null &&
-        typeof payload.params === 'object' &&
-        Object.prototype.hasOwnProperty.call(payload.params, 'repositoryCheckout')
-      ) {
-        if (payload.localMachine === true || !checkoutRoutes)
+    withBackendRequestLatency(
+      async (
+        event,
+        payload: {
+          method?: string;
+          params?: unknown;
+          timeoutMs?: number;
+          localMachine?: boolean;
+          reviewMonitoring?: unknown;
+          traceId?: unknown;
+        },
+        trace,
+      ) => {
+        const method = payload?.method;
+        if (typeof method !== 'string' || method.length === 0) {
+          return { ok: false, error: { code: 'INVALID_PARAMS', message: 'method is required' } };
+        }
+        if (method === DRAFT_SYNC_METHOD) return sharedDraftRequest(event, payload);
+        if (
+          method.startsWith('sourceControl.read.') ||
+          method.startsWith('sourceControl.checkout.') ||
+          method === 'workspace.repositoryContext' ||
+          method === 'workspace.repositoryContext.capture' ||
+          method === 'workspace.repositoryContext.release' ||
+          method === 'workspace.repositorySelection.capture' ||
+          method === 'workspace.repositorySelection.save' ||
+          method === 'workspace.repositorySelection.reset' ||
+          method === 'workspace.repositorySelection.reconcile' ||
+          method === 'workspace.repositorySelection.release' ||
+          method === 'accept-changes.reconcile' ||
+          method === 'accept-changes.release' ||
+          ((method === 'accept-changes.prepare' || method === 'accept-changes.execute') &&
+            payload.params !== null &&
+            typeof payload.params === 'object' &&
+            Object.prototype.hasOwnProperty.call(payload.params, 'review'))
+        ) {
           return {
             ok: false,
-            error: {
-              code: 'REPOSITORY_CHECKOUT_UNAVAILABLE',
-              message: 'REPOSITORY_CHECKOUT_UNAVAILABLE',
-            },
+            // i18n-ignore (internal route diagnostic; facade emits a typed unavailable state)
+            error: { code: 'REPOSITORY_ROUTE_UNAVAILABLE', message: 'Repository route required' },
           };
-        return checkoutRoutes.create(event, payload.params, payload.timeoutMs);
-      }
-      // `timeoutMs` is an optional per-call override forwarded verbatim to the
-      // JSON-RPC client. Long daemon operations (e.g. `git.pull`, whose own
-      // bound exceeds the flat 30s default) pass a larger value so the daemon's
-      // structured `{ok:false}` result wins over a transport timeout.
-      const timeoutMs = typeof payload?.timeoutMs === 'number' ? payload.timeoutMs : undefined;
-      const history =
-        payload.localMachine === true
-          ? undefined
-          : prMonitorRoutes?.requestHistory(
-              event,
-              method,
-              payload.params,
-              payload.reviewMonitoring,
-              timeoutMs,
-            );
-      if (history !== undefined) return history;
-      try {
-        const { backendId, client } =
+        }
+        if (
+          method === 'workspace.create' &&
+          payload.params !== null &&
+          typeof payload.params === 'object' &&
+          Object.prototype.hasOwnProperty.call(payload.params, 'repositoryCheckout')
+        ) {
+          if (payload.localMachine === true || !checkoutRoutes)
+            return {
+              ok: false,
+              error: {
+                code: 'REPOSITORY_CHECKOUT_UNAVAILABLE',
+                message: 'REPOSITORY_CHECKOUT_UNAVAILABLE',
+              },
+            };
+          return checkoutRoutes.create(event, payload.params, payload.timeoutMs);
+        }
+        // `timeoutMs` is an optional per-call override forwarded verbatim to the
+        // JSON-RPC client. Long daemon operations (e.g. `git.pull`, whose own
+        // bound exceeds the flat 30s default) pass a larger value so the daemon's
+        // structured `{ok:false}` result wins over a transport timeout.
+        const timeoutMs = typeof payload?.timeoutMs === 'number' ? payload.timeoutMs : undefined;
+        const history =
           payload.localMachine === true
-            ? { backendId: LOCAL_CONNECTION_ID, client: getLocalBackendClient() }
-            : getBackendClientForIpcEvent(event);
-        // Bulk attachment transfers on a remote backend ride their own
-        // short-lived connection so a slow-draining 20+ MiB frame never
-        // head-of-line-blocks the main channel (its heartbeat and unrelated
-        // RPCs stay unaffected) — monorepo#2458. The local UDS sidecar keeps
-        // the single socket: no uplink to saturate, same-host bandwidth.
-        if (shouldUseTransferConnection(method, client.getConfig())) {
-          poolAuxiliary('transfer');
-          const result = await requestOverTransferConnection(
-            client.getConfig(),
-            method,
-            payload?.params,
-            { timeoutMs },
-            backendId,
-          );
+            ? undefined
+            : prMonitorRoutes?.requestHistory(
+                event,
+                method,
+                payload.params,
+                payload.reviewMonitoring,
+                timeoutMs,
+              );
+        if (history !== undefined) return history;
+        try {
+          const { backendId, client } =
+            payload.localMachine === true
+              ? { backendId: LOCAL_CONNECTION_ID, client: getLocalBackendClient() }
+              : getBackendClientForIpcEvent(event);
+          // Bulk attachment transfers on a remote backend ride their own
+          // short-lived connection so a slow-draining 20+ MiB frame never
+          // head-of-line-blocks the main channel (its heartbeat and unrelated
+          // RPCs stay unaffected) — monorepo#2458. The local UDS sidecar keeps
+          // the single socket: no uplink to saturate, same-host bandwidth.
+          if (shouldUseTransferConnection(method, client.getConfig())) {
+            poolAuxiliary('transfer');
+            const result = await requestOverTransferConnection(
+              client.getConfig(),
+              method,
+              payload?.params,
+              { timeoutMs },
+              backendId,
+            );
+            return { ok: true, result };
+          }
+          const nameGuard =
+            method === 'system.status' ? beginGuestHostnameRead(backendId, client) : undefined;
+          // Renderer capability/identity reads must not renegotiate the pooled
+          // connection: a real hello invalidates desktop consent and its event epoch.
+          // Main-owned identity refreshes and explicit renderer hellos still go on wire.
+          const params = payload?.params;
+          const helloRead =
+            method === 'client.hello' &&
+            (params == null ||
+              (typeof params === 'object' &&
+                !Array.isArray(params) &&
+                Object.keys(params).length === 0));
+          const result = helloRead
+            ? await client.readHelloSnapshot()
+            : trace
+              ? await trace.rpc(() =>
+                  client.request(method, params, { timeoutMs, traceId: trace.traceId }),
+                )
+              : await client.request(method, params, { timeoutMs });
+          if (nameGuard?.()) void refreshGuestHostname(backendId, result, nameGuard);
+          const expected = invitedClientCredentials.get(client);
+          if (expected && method === 'principal.me') {
+            const snapshot = parsePrincipalSnapshot(invitedClientHellos.get(client), result);
+            if (
+              !snapshot ||
+              snapshot.principal.id !== expected.principalId ||
+              !invitedRole(snapshot)
+            )
+              throw new Error('Invited principal unavailable');
+          }
           return { ok: true, result };
+        } catch (error) {
+          return { ok: false, error: toErrorPayload(error) };
         }
-        const nameGuard =
-          method === 'system.status' ? beginGuestHostnameRead(backendId, client) : undefined;
-        // Renderer capability/identity reads must not renegotiate the pooled
-        // connection: a real hello invalidates desktop consent and its event epoch.
-        // Main-owned identity refreshes and explicit renderer hellos still go on wire.
-        const params = payload?.params;
-        const helloRead =
-          method === 'client.hello' &&
-          (params == null ||
-            (typeof params === 'object' &&
-              !Array.isArray(params) &&
-              Object.keys(params).length === 0));
-        const result = helloRead
-          ? await client.readHelloSnapshot()
-          : await client.request(method, params, { timeoutMs });
-        if (nameGuard?.()) void refreshGuestHostname(backendId, result, nameGuard);
-        const expected = invitedClientCredentials.get(client);
-        if (expected && method === 'principal.me') {
-          const snapshot = parsePrincipalSnapshot(invitedClientHellos.get(client), result);
-          if (!snapshot || snapshot.principal.id !== expected.principalId || !invitedRole(snapshot))
-            throw new Error('Invited principal unavailable');
-        }
-        return { ok: true, result };
-      } catch (error) {
-        return { ok: false, error: toErrorPayload(error) };
-      }
-    },
+      },
+    ),
   );
 
   ipcMain.handle(BACKEND.SUBSCRIBE, async (event, params: unknown) => {
@@ -5963,6 +5984,7 @@ export function disposeAllBackendClients(): void {
   liveConnectionRecords.clear();
   repositoryRoutes?.dispose();
   resourceRoutes?.dispose();
+  neutralWorkspaceRoutes?.dispose();
   prMonitorRoutes?.dispose();
   checkoutRoutes?.dispose();
   selectionRoutes?.dispose();

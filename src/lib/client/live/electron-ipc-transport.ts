@@ -1,3 +1,6 @@
+import { createNeutralWorkspaceTransport } from './neutral-workspace-transport';
+import { beginLatencyRequest } from './latency-recorder';
+import type { MainRequestTiming } from '$shared/request-latency';
 import { supportsReviewMonitoring, REVIEW_MONITOR_HISTORY_METHODS } from '$shared/types/pr-monitor';
 import { createPrMonitorTransport } from './pr-monitor-transport';
 import type { PrincipalDiscovery } from '$shared/types/principal';
@@ -55,6 +58,7 @@ interface BackendResult<T> {
   ok: boolean;
   result?: T;
   error?: BackendErrorPayload;
+  latency?: MainRequestTiming;
 }
 
 export function electronAPI(): Window['electronAPI'] | undefined {
@@ -200,6 +204,12 @@ export function createElectronIpcBackendTransport(
     'onMonitorReconnected',
   );
   return {
+    onNeutralWorkspaceReady(handler) {
+      const api = electronAPI();
+      if (!api) return () => {};
+      // Main emits READY on ordinary acknowledged hello, including identity replacement.
+      return monitorReady.subscribe(api, handler);
+    },
     onMonitorReconnected(handler) {
       const api = electronAPI();
       if (!api) return () => {};
@@ -231,6 +241,7 @@ export function createElectronIpcBackendTransport(
       return unwrap(response);
     },
     prepareNativeReview,
+    captureNeutralWorkspace: createNeutralWorkspaceTransport(electronAPI),
     captureRepositoryResource: createRepositoryResourceTransport(electronAPI),
     captureRepositoryCheckout: createRepositoryCheckoutTransport(electronAPI),
 
@@ -354,33 +365,42 @@ export function createElectronIpcBackendTransport(
       params?: unknown,
       options?: BackendRequestOptions,
     ): Promise<T> {
-      const api = electronAPI();
-      if (!api)
-        throw new BackendError({ code: 'UNAVAILABLE', message: 'Backend bridge unavailable' });
-      const invokePayload: {
-        method: string;
-        params?: unknown;
-        timeoutMs?: number;
-        localMachine?: boolean;
-        reviewMonitoring?: number;
-      } = {
-        method,
-        params: toPlainJson(params),
-      };
-      if (options?.timeoutMs !== undefined) invokePayload.timeoutMs = options.timeoutMs;
-      if (options?.localMachine) invokePayload.localMachine = true;
-      if (
-        !options?.localMachine &&
-        REVIEW_MONITOR_HISTORY_METHODS.has(method) &&
-        supportsReviewMonitoring(recipient.reviewMonitoring) &&
-        supportsReviewMonitoring(api.reviewMonitoring)
-      )
-        invokePayload.reviewMonitoring = Math.min(
-          recipient.reviewMonitoring!,
-          api.reviewMonitoring!,
-        );
-      const response = (await api.invoke(BACKEND.REQUEST, invokePayload)) as BackendResult<T>;
-      return unwrap(response);
+      const trace = beginLatencyRequest(method, options?.interactionTraceId);
+      try {
+        const api = electronAPI();
+        if (!api)
+          throw new BackendError({ code: 'UNAVAILABLE', message: 'Backend bridge unavailable' });
+        const invokePayload: {
+          method: string;
+          params?: unknown;
+          timeoutMs?: number;
+          localMachine?: boolean;
+          reviewMonitoring?: number;
+          traceId?: string;
+        } = {
+          method,
+          params: toPlainJson(params),
+        };
+        if (trace) invokePayload.traceId = trace.traceId;
+        if (options?.timeoutMs !== undefined) invokePayload.timeoutMs = options.timeoutMs;
+        if (options?.localMachine) invokePayload.localMachine = true;
+        if (
+          !options?.localMachine &&
+          REVIEW_MONITOR_HISTORY_METHODS.has(method) &&
+          supportsReviewMonitoring(recipient.reviewMonitoring) &&
+          supportsReviewMonitoring(api.reviewMonitoring)
+        )
+          invokePayload.reviewMonitoring = Math.min(
+            recipient.reviewMonitoring!,
+            api.reviewMonitoring!,
+          );
+        const response = (await api.invoke(BACKEND.REQUEST, invokePayload)) as BackendResult<T>;
+        trace?.finish(response?.ok ? 'success' : 'error', response?.latency);
+        return unwrap(response);
+      } catch (error) {
+        trace?.finish('error');
+        throw error;
+      }
     },
 
     async subscribe<T = { subscriptionId?: string }>(params: unknown): Promise<T> {

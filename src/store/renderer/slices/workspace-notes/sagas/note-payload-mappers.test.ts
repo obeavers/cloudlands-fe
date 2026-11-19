@@ -25,6 +25,24 @@ function makeNote(task: TaskMetadata): Note {
 // (dependsOn/conflictsWith were dropped on the hydrate path this way after
 // fe#1038; unmetDependsOn is the daemon projection from monorepo#1979).
 describe('toRuntimeNote — metadata.task relation fields', () => {
+  it('retains structured prospective requirements without sharing mutable arrays', () => {
+    const task: TaskMetadata = {
+      status: 'not_started',
+      workDefinition: {
+        purpose: 'source',
+        criteria: [{ index: 0, textDigest: 'a'.repeat(64), requiredKinds: ['round-trip'] }],
+        files: [{ rootId: 'primary', path: 'src/data.rs', role: 'in-scope' }],
+      },
+    };
+    const runtime = toRuntimeNote(makeNote(task));
+    expect(runtime.metadata?.task?.workDefinition).toEqual(task.workDefinition);
+    task.workDefinition!.criteria[0].requiredKinds.push('typecheck');
+    task.workDefinition!.files[0].path = 'changed.rs';
+    expect(runtime.metadata?.task?.workDefinition?.criteria[0].requiredKinds).toEqual([
+      'round-trip',
+    ]);
+    expect(runtime.metadata?.task?.workDefinition?.files[0].path).toBe('src/data.rs');
+  });
   it('preserves dependsOn, conflictsWith, and unmetDependsOn', () => {
     const runtime = toRuntimeNote(
       makeNote({

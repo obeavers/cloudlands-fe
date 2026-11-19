@@ -1,3 +1,4 @@
+import { taskConfirmationReducer } from './slices/task-confirmation/task-confirmation-slice';
 import { dockConversationReducer } from './slices/dock-conversation/dock-conversation-slice';
 import { desktopControlReducer } from './slices/desktop-control/desktop-control-slice';
 import { homeWorkspacesReducer } from '$features/home/home-workspaces-slice';
@@ -88,6 +89,9 @@ import { scriptMonitorReducer } from './slices/script-monitor/script-monitor-sli
 import { agentWorkersReducer } from './slices/agent-workers/agent-workers-slice';
 import { prMonitorReducer } from './slices/pr-monitor/pr-monitor-slice';
 import { agentFollowReducer } from './slices/agent-follow/agent-follow-slice';
+import { vcsReducer } from './slices/vcs/vcs-slice';
+import { workReducer } from './slices/work/work-slice';
+import { memoryReadReducer } from './slices/memory-read/memory-read-slice';
 import { gitReducer } from './slices/git/git-slice';
 import { gitWriteReducer } from './slices/git/git-write-slice';
 import { acceptWorkflowReducer } from './slices/accept-workflow/accept-workflow-slice';
@@ -221,6 +225,10 @@ export const reducers = {
   scriptMonitor: scriptMonitorReducer,
   agentWorkers: agentWorkersReducer,
   agentFollow: agentFollowReducer,
+  taskConfirmation: taskConfirmationReducer,
+  vcs: vcsReducer,
+  work: workReducer,
+  memoryRead: memoryReadReducer,
   git: gitReducer,
   gitWrite: gitWriteReducer,
   acceptWorkflow: acceptWorkflowReducer,

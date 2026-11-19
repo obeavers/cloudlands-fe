@@ -1037,6 +1037,12 @@ export const IPC_CHANNELS = {
       RELEASE: 'backend:repository-checkout:release',
       RETIRED: 'backend:repository-checkout:retired',
     },
+    NEUTRAL_WORKSPACE: {
+      CAPTURE: 'backend:neutral-workspace:capture',
+      REQUEST: 'backend:neutral-workspace:request',
+      RELEASE: 'backend:neutral-workspace:release',
+      INGRESS: 'backend:neutral-workspace:ingress',
+    },
     REPOSITORY_RESOURCE: {
       CAPTURE: 'backend:repository-resource:capture',
       DETAIL: 'backend:repository-resource:detail',
@@ -1261,6 +1267,7 @@ export const EVENT_CHANNELS = [
   IPC_CHANNELS.DOCK_CAPTURE_EDITOR.NOTE_DICTATION_REQUESTED,
   IPC_CHANNELS.DOCK_CAPTURE_EDITOR.NOTE_DICTATION_UPDATE,
   IPC_CHANNELS.DOCK_CAPTURE_EDITOR.ATTACHED,
+  IPC_CHANNELS.BACKEND.NEUTRAL_WORKSPACE.INGRESS,
   IPC_CHANNELS.BACKEND.REPOSITORY_CHECKOUT.RETIRED,
   IPC_CHANNELS.BACKEND.REPOSITORY.RETIRED,
   IPC_CHANNELS.BACKEND.REPOSITORY_SELECTION.RETIRED,

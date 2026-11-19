@@ -1,3 +1,7 @@
+import type { VcsClient } from './live/vcs-client';
+import type { TaskRevisionRef, TaskWorkDefinition } from '$shared/types/work';
+import type { TaskEvidenceRequest, TaskEvidenceResponse } from '$shared/types/task-run-evidence';
+import type { WorkClient } from './live/work-client';
 import type { WorkspaceId } from '$shared/types/branded-ids';
 import type { MoveHomeTarget, WorkspaceHome } from '$shared/types/workspace-home';
 import type { MessageBlockImageReference } from '$shared/types/wire-image-block';
@@ -241,6 +245,7 @@ export interface MutationResult extends SubmissionCorrelation {
  *   `name`-present ⇒ explicitly set.
  */
 export interface AgentCreateRequest {
+  expectedTaskRevision?: TaskRevisionRef;
   placement?: AgentPlacement;
   workspaceId: string;
   prompt?: string;
@@ -1912,7 +1917,26 @@ export interface CreatePrerequisiteOptions {
   status?: string;
 }
 
+export interface TaskPlanConfiguration {
+  workspaceId: string;
+  noteId: string;
+  expectedNoteVersion: number;
+  acceptanceCriteria: string[];
+  workDefinition: TaskWorkDefinition | null;
+}
+
+export interface TaskPlanConfirmation {
+  note: Note;
+  taskRevision: TaskRevisionRef;
+}
+
 export interface TasksClient {
+  supportsEvidenceRead?(): Promise<boolean>;
+  workEvidence?(input: TaskEvidenceRequest): Promise<TaskEvidenceResponse>;
+  /** Reads the acknowledged hello, without polling or issuing client.hello. */
+  supportsPlanning?(): Promise<boolean>;
+  /** Human-only atomic update of criteria and source definition. */
+  configureWorkDefinition?(input: TaskPlanConfiguration): Promise<TaskPlanConfirmation>;
   /**
    * `task.list` (PROTOCOL §5.4) → `{ tasks, stats }`. `stats` is the workspace-wide
    * rollup the BE owns (excludes `cancelled`; `complete` counts toward `completed`;
@@ -2828,6 +2852,14 @@ export interface DraftsClient {
 
 /** The aggregate seam exposing every backend domain to the renderer. */
 export interface AppClient {
+  /** Captures experimental ports for this workspace without changing global domain clients. */
+  captureNeutralWorkspace?(
+    workspaceId: string,
+  ): Promise<import('./live/neutral-workspace-client').NeutralWorkspaceClients>;
+  onNeutralWorkspaceReady?(handler: () => void): Unsubscribe;
+  /** Internal neutral adapters; absent until an authorized, documented service owner supplies ports. */
+  vcs?: VcsClient;
+  work?: WorkClient;
   workspaces: WorkspacesClient;
   agents: AgentsClient;
   chat: ChatClient;

@@ -85,6 +85,7 @@ export const ENFORCED_DIRS = [
   // acp-official main/server + parsers/plans, and cortex/cortex-acp emit
   // agent-facing prompt/wire content — intentionally not enforced.
   'src/features/accept-changes',
+  'src/features/task-confirmation',
   'src/features/auto-update',
   'src/features/backend',
   'src/features/cdp',

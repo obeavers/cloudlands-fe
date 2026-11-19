@@ -1,7 +1,11 @@
 import { readdirSync, readFileSync } from 'node:fs';
 import path from 'node:path';
 import { describe, expect, it } from 'vitest';
-import { NODE_CAPABILITY_KEYS, pickNodeCapabilities } from './node-capabilities';
+import {
+  NODE_CAPABILITY_KEYS,
+  pickNodeCapabilities,
+  isTaskPlanningRequest,
+} from './node-capabilities';
 
 const SRC = path.resolve(__dirname, '..');
 
@@ -73,12 +77,22 @@ describe('node capability list', () => {
       'remoteInitialAgent',
       'workspaceMembershipEvents',
       'noteTruncatedRead',
+      'taskPlanning',
+      'taskEvidenceRead',
       'rawScreenshotRetention',
       'agentNodes',
       // Main-process reads (daemon-links.ts, remote-machines.ipc.ts).
       'remoteLinkTraffic',
     ])
       expect(keys).toContain(key);
+  });
+
+  it('requires planning support for configuration and every explicit confirmed-create operand', () => {
+    expect(isTaskPlanningRequest('task.configureWorkDefinition', {})).toBe(true);
+    expect(isTaskPlanningRequest('agent.create', { expectedTaskRevision: null })).toBe(true);
+    expect(isTaskPlanningRequest('agent.create', { expectedTaskRevision: {} })).toBe(true);
+    expect(isTaskPlanningRequest('agent.create', { workspaceId: 'legacy' })).toBe(false);
+    expect(isTaskPlanningRequest('note.get', { expectedTaskRevision: {} })).toBe(false);
   });
 
   it('copies only strict integer advertisements, for every listed key', () => {

@@ -521,6 +521,77 @@ describe('UnifiedAgentFactory', () => {
       expect('nameExplicitlySet' in request).toBe(false);
     });
 
+    it('keeps the human-confirmed task pin through normalization and backend creation', async () => {
+      agentsApi.create.mockClear();
+      const expectedTaskRevision = {
+        workspaceId: String(mockWorkspace.id),
+        noteId: 'task-source',
+        rev: 7,
+        digest: 'immutable-task-source',
+        projectionSchemaVersion: 1 as const,
+      };
+      const result = await factory.createAgent(mockWorkspace, {
+        name: 'Confirmed task',
+        workspaceId: mockWorkspace.id as any,
+        metadata: { taskNoteId: 'task-source' },
+        expectedTaskRevision,
+      });
+      expect(result.success).toBe(true);
+      expect(agentsApi.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          expectedTaskRevision,
+          metadata: expect.objectContaining({ taskNoteId: 'task-source' }),
+        }),
+      );
+    });
+
+    it('retains a known confirmed allocation after connection replacement without publishing, prompting, or retrying', async () => {
+      mockStoreState.current = withLegacyPrincipal(mockStoreState.current) as unknown as Record<
+        string,
+        unknown
+      >;
+      const response = Promise.withResolvers<unknown>();
+      agentsApi.create.mockReturnValueOnce(response.promise);
+      const expectedTaskRevision = {
+        workspaceId: String(mockWorkspace.id),
+        noteId: 'task-source',
+        rev: 7,
+        digest: 'confirmed',
+        projectionSchemaVersion: 1 as const,
+      };
+      const pending = factory.createAgent(mockWorkspace, {
+        workspaceId: mockWorkspace.id,
+        initialMessage: 'Exact confirmed task',
+        expectedTaskRevision,
+        metadata: { taskNoteId: 'task-source' },
+      });
+      await vi.waitFor(() => expect(agentsApi.create).toHaveBeenCalledOnce());
+      mockStoreState.current = withLegacyPrincipal({
+        ...mockStoreState.current,
+        connections: { windowBackendId: 'replacement' },
+      }) as unknown as Record<string, unknown>;
+      mockStoreDispatch.mockClear();
+      backendRequestMock.mockClear();
+      response.resolve({
+        id: 'agent-known-created',
+        workspaceId: mockWorkspace.id,
+        name: 'Original',
+      });
+      await expect(pending).resolves.toMatchObject({
+        success: false,
+        agentId: 'agent-known-created',
+        knownAllocation: {
+          workspaceId: String(mockWorkspace.id),
+          agentId: 'agent-known-created',
+          initialMessageSent: false,
+        },
+        error: expect.stringContaining('agent-known-created'),
+      });
+      expect(agentsApi.create).toHaveBeenCalledOnce();
+      expect(mockStoreDispatch).not.toHaveBeenCalled();
+      expect(backendRequestMock).not.toHaveBeenCalled();
+    });
+
     it('adopts the daemon-assigned agent id from the create response', async () => {
       agentsApi.create.mockClear();
       const config: UnifiedAgentConfig = {

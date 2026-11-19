@@ -22,6 +22,10 @@ export const NODE_CAPABILITY_KEYS = [
   'chiefAttachments',
   // Truncated note reads (§5.2): gates maxContentBytes / baseContentBytes.
   'noteTruncatedRead',
+  // Human-confirmed task source and durable first-turn revision admission.
+  'taskPlanning',
+  // Bounded history for the original confirmed first turn; no source authority.
+  'taskEvidenceRead',
   // Daemon-to-daemon remote machines: gates "Let <backend> run agents here".
   'remoteMachines',
   // `workspace.create.initialAgent.placement` on a remote machine: gates Start On.
@@ -55,4 +59,15 @@ export function pickNodeCapabilities(
   return Object.freeze(
     Object.fromEntries(NODE_CAPABILITY_KEYS.map((key) => [key, capabilities?.[key] === 1 ? 1 : 0])),
   ) as NodeCapabilitySnapshot;
+}
+
+/** Additive revision operands must never be ignored by an older daemon. */
+export function isTaskPlanningRequest(method: string, params: unknown): boolean {
+  return (
+    method === 'task.configureWorkDefinition' ||
+    (method === 'agent.create' &&
+      params !== null &&
+      typeof params === 'object' &&
+      Object.prototype.hasOwnProperty.call(params, 'expectedTaskRevision'))
+  );
 }

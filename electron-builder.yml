@@ -38,6 +38,8 @@ files:
 # Bundle the intentd binary into the packaged app
 # Runtime path: process.resourcesPath/intentd/intentd (intentd.exe on Windows)
 extraResources:
+  # Also carries the optional isolated host at intentd/libexec/atomic-host/;
+  # missing host payloads remain explicitly unavailable to the daemon.
   - from: resources/sidecar
     to: intentd
     filter:

@@ -122,6 +122,8 @@ describe('renderer app saga registry', () => {
       'prMonitorSaga',
       'scriptMonitorSaga',
       'agentWorkersSaga',
+      'neutralReadModelSaga',
+      'taskConfirmationSaga',
       'gitRootsSaga',
       'uiLayoutPersistenceSaga',
       'tabStateSaga',

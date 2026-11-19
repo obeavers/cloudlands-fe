@@ -118,6 +118,16 @@ export async function backendRequest<T = unknown>(
     return await transport.request<T>(method, params, options);
   } catch (error) {
     if (error instanceof BackendError) {
+      if (
+        error.code === 'TASK_PLANNING_UNAVAILABLE' ||
+        error.message === 'TASK_PLANNING_UNAVAILABLE'
+      ) {
+        throw new BackendError({
+          code: 'TASK_PLANNING_UNAVAILABLE',
+          message: m.task_plan_unavailable_error(),
+          data: error.data,
+        });
+      }
       const message = hostExecutionAuthorizationMessage(
         (error.data as { executionAuthorization?: unknown } | undefined)?.executionAuthorization,
       );

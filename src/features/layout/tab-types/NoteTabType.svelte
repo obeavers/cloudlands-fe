@@ -51,6 +51,7 @@
   import OpenComboButton from '$features/external-editors/components/OpenComboButton.svelte';
   import NoteViewSettingsDropdown from './NoteViewSettingsDropdown.svelte';
   import RenderedNotePreview from './RenderedNotePreview.svelte';
+  import TaskConfirmationPanel from '$features/task-confirmation/TaskConfirmationPanel.svelte';
   import TruncatedNoteView from './TruncatedNoteView.svelte';
   import NotePresenceAvatarStack from '$features/notes/note-presence/NotePresenceAvatarStack.svelte';
   import {
@@ -468,4 +469,7 @@
       {/if}
     </NoteContentSurface>
   </div>
+  {#if tab.noteId && $note?.metadata?.task && !noteTruncated}
+    <TaskConfirmationPanel {workspaceId} noteId={tab.noteId} noteRev={$note.rev} />
+  {/if}
 </div>

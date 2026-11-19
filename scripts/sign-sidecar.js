@@ -22,6 +22,7 @@ import path from 'path';
 import fs from 'fs';
 import { fileURLToPath } from 'url';
 import native from './macos-native.cjs';
+import atomicHost from './atomic-host-payload.cjs';
 
 const execAsync = promisify(exec);
 const execFileAsync = promisify(execFile);
@@ -570,6 +571,13 @@ async function signSidecar(context) {
   // Check the actual copied payload before either signed or unsigned packaging.
   native.validatePackagedMacBinaries(appPath, native.builderMacArch(context));
   const sidecarPath = path.join(appPath, 'Contents', 'Resources', 'intentd', 'intentd');
+  const hostDirectory = atomicHost.payloadDirectory(path.dirname(sidecarPath));
+  const hostPath = path.join(hostDirectory, 'intent-atomic-host');
+  if (fs.existsSync(hostDirectory) && fs.readdirSync(hostDirectory).length)
+    atomicHost.readPayload(
+      hostDirectory,
+      native.builderMacArch(context) === 'arm64' ? 'aarch64-apple-darwin' : 'x86_64-apple-darwin',
+    );
   // Optional tailcat tunnel client (scripts/fetch-tailcat.cjs); absent when
   // the staging build skipped it (TAILCAT_SKIP=1).
   const tailcatPath = path.join(appPath, 'Contents', 'Resources', 'tailcat', 'tailcat');
@@ -638,6 +646,13 @@ async function signSidecar(context) {
 
     // Verify the signature
     await verifySignature(sidecarPath);
+
+    // Sign the isolated optional host before the app seal; retain both build and signed hashes.
+    if (fs.existsSync(hostPath)) {
+      await signBinary(hostPath, identity);
+      await verifySignature(hostPath);
+      atomicHost.refreshSignedHash(hostDirectory);
+    }
 
     // Sign the tailcat tunnel client when bundled (same seal-ordering constraint)
     if (fs.existsSync(tailcatPath)) {

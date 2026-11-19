@@ -10,6 +10,7 @@ import { AgentNodeFieldsSchema } from './types/agent-node';
 import { z } from 'zod';
 import { isoDateTime } from '$shared/zod-compat';
 import { CheckoutSelectionSchema } from './types/repository-checkout';
+import { TaskWorkDefinitionSchema } from './types/work';
 import {
   AgentStatus,
   MESSAGE_ROLES,
@@ -278,6 +279,7 @@ export const TaskMetadataSchema = z.object({
   status: TaskStatusSchema,
   assignedAgentIds: z.array(z.string()).optional(), // Phase 1C: Agent assignment
   acceptanceCriteria: z.array(z.string()).optional(),
+  workDefinition: TaskWorkDefinitionSchema.optional(),
   estimatedEffort: z.string().optional(),
   actualEffort: z.string().optional(),
   blockedReason: z.string().optional(),

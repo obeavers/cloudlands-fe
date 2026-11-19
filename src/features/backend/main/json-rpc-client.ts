@@ -13,7 +13,11 @@ import { EventEmitter } from 'node:events';
 import type { Duplex } from 'node:stream';
 import { StringDecoder } from 'node:string_decoder';
 import { parseProtocolVersion, type ProtocolVersion } from '$shared/protocol-version';
-import { pickNodeCapabilities, type NodeCapabilitySnapshot } from '$shared/node-capabilities';
+import {
+  pickNodeCapabilities,
+  isTaskPlanningRequest,
+  type NodeCapabilitySnapshot,
+} from '$shared/node-capabilities';
 import {
   classifyStartupReply,
   type DaemonStartupState,
@@ -26,6 +30,7 @@ import {
 } from '$shared/daemon-startup';
 import { assertScopedFileReadSupport } from '$shared/root-file-read-support';
 import { Logger } from '$shared/logger';
+import { requestTraceId, responseRequestId } from '$shared/request-latency';
 import type { RpcTrafficMessage, RpcTrafficObserver } from './rpc-traffic';
 import { JsonRpcError, type JsonRpcErrorShape } from './json-rpc-errors';
 import {
@@ -295,7 +300,7 @@ export class JsonRpcClient extends EventEmitter {
   private heartbeatInFlight = false;
   private consecutiveHealthCheckFailures = 0;
   private connectWaiters: Array<{ resolve: () => void; reject: (e: Error) => void }> = [];
-  private readonly pending = new Map<number, PendingRequest>();
+  private readonly pending = new Map<number | string, PendingRequest>();
   /** A successful connection or failed dial requires recovery on the next connect. */
   private hasBeenConnected = false;
   private hasConnectionFailed = false;
@@ -658,7 +663,7 @@ export class JsonRpcClient extends EventEmitter {
     captured: object,
     method: string,
     params?: unknown,
-    options?: { timeoutMs?: number },
+    options?: { timeoutMs?: number; traceId?: string },
     parent?: object,
   ): Promise<T> {
     const refused = this.refuseIndependent(parent);
@@ -672,7 +677,7 @@ export class JsonRpcClient extends EventEmitter {
     connection: object,
     method: string,
     params?: unknown,
-    options?: { timeoutMs?: number },
+    options?: { timeoutMs?: number; traceId?: string },
   ): Promise<T> {
     if (!connection || connection !== this.getRepositoryConnection() || method === HELLO_METHOD) {
       return Promise.reject(new Error('Captured repository connection is unavailable'));
@@ -682,7 +687,7 @@ export class JsonRpcClient extends EventEmitter {
       typeof override === 'number' && Number.isFinite(override) && override > 0
         ? override
         : this.requestTimeoutMs;
-    return this.sendNow<T>(method, params, timeout);
+    return this.sendNow<T>(method, params, timeout, options?.traceId);
   }
 
   private isReadyHelloPending(): boolean {
@@ -925,7 +930,7 @@ export class JsonRpcClient extends EventEmitter {
   request<T = unknown>(
     method: string,
     params?: unknown,
-    options?: { timeoutMs?: number },
+    options?: { timeoutMs?: number; traceId?: string },
     parent?: object,
   ): Promise<T> {
     if (method === 'host.execStream' || method.startsWith('host.execStream.'))
@@ -940,7 +945,7 @@ export class JsonRpcClient extends EventEmitter {
   private requestOriginal<T = unknown>(
     method: string,
     params?: unknown,
-    options?: { timeoutMs?: number },
+    options?: { timeoutMs?: number; traceId?: string },
     parent?: object,
   ): Promise<T> {
     if (this.disposed) return Promise.reject(new Error('JSON-RPC client disposed'));
@@ -952,6 +957,20 @@ export class JsonRpcClient extends EventEmitter {
     // `onHelloResult` makes wait for `connected` like on any other connect.
     if (this.startupState?.state === 'starting' && !this.isReadyHelloPending())
       return Promise.reject(new JsonRpcError(startupErrorShape(this.startupState)));
+    if (isTaskPlanningRequest(method, params)) {
+      const connection = this.getRepositoryConnection();
+      if (!connection || this.getNodeCapabilities()?.taskPlanning !== 1) {
+        return Promise.reject(
+          Object.assign(new Error('TASK_PLANNING_UNAVAILABLE'), {
+            code: 'TASK_PLANNING_UNAVAILABLE',
+          }),
+        );
+      }
+      // Check and synchronous write belong to this acknowledged connection.
+      // Never queue a confirmed plan onto a replacement daemon. A successful
+      // allocation remains a fact even if the connection later retires.
+      return this.requestOnCapturedConnectionOriginal<T>(connection, method, params, options);
+    }
     if (
       [
         'sourceControl.authStatus',
@@ -994,12 +1013,14 @@ export class JsonRpcClient extends EventEmitter {
     // handshake — an anonymous re-hello would mint a fresh clientId and
     // orphan the previous identity's scoped state (`drafts.*`, §5.16).
     if (method === HELLO_METHOD && (this.helloParams || this.onHelloResult)) {
-      return this.requestHello(params, timeoutMs, parent) as Promise<T>;
+      return this.requestHello(params, timeoutMs, parent, options?.traceId) as Promise<T>;
     }
     if (this.status === 'connected') {
-      return this.sendNow<T>(method, params, timeoutMs);
+      return this.sendNow<T>(method, params, timeoutMs, options?.traceId);
     }
-    return this.ensureConnected().then(() => this.sendNow<T>(method, params, timeoutMs));
+    return this.ensureConnected().then(() =>
+      this.sendNow<T>(method, params, timeoutMs, options?.traceId),
+    );
   }
 
   /**
@@ -1008,11 +1029,17 @@ export class JsonRpcClient extends EventEmitter {
    * after the call is correlated correctly. Callers must ensure the socket is
    * usable: either `status === 'connected'` or the §5.17 handshake window.
    */
-  private sendNow<T = unknown>(method: string, params: unknown, timeoutMs: number): Promise<T> {
+  private sendNow<T = unknown>(
+    method: string,
+    params: unknown,
+    timeoutMs: number,
+    traceId?: string,
+  ): Promise<T> {
     const socket = this.socket;
     const helloRevision = method === HELLO_METHOD ? ++this.helloRevision : undefined;
     if (method === HELLO_METHOD) this.helloSnapshot = undefined;
-    const id = ++this.requestId;
+    const id = requestTraceId(traceId) ?? ++this.requestId;
+    if (this.pending.has(id)) return Promise.reject(new Error('Duplicate request trace id'));
     return new Promise<T>((resolve, reject) => {
       assertScopedFileReadSupport(method, params, this.protocolVersion);
       const payload = `${JSON.stringify({ jsonrpc: '2.0', id, method, params })}\n`;
@@ -1057,7 +1084,7 @@ export class JsonRpcClient extends EventEmitter {
     });
   }
 
-  private observeOutboundRequest(id: number, method: string, frame: string): void {
+  private observeOutboundRequest(id: number | string, method: string, frame: string): void {
     // Keep the frame out of sendNow's shared closure context: its timeout and
     // pending callbacks outlive the write even when no observer is installed.
     this.observeFrame(() => ({
@@ -1075,6 +1102,7 @@ export class JsonRpcClient extends EventEmitter {
     params: unknown,
     timeoutMs: number,
     parent?: object,
+    traceId?: string,
   ): Promise<unknown> {
     let attempt: object | undefined;
     let incarnation = this.socketIncarnation;
@@ -1097,7 +1125,7 @@ export class JsonRpcClient extends EventEmitter {
         await this.ensureConnected();
       if (this.disposed) throw new Error('JSON-RPC client disposed');
       beginRenegotiation();
-      const result = await this.sendNow(HELLO_METHOD, merged, timeoutMs).catch((error) => {
+      const result = await this.sendNow(HELLO_METHOD, merged, timeoutMs, traceId).catch((error) => {
         if (isHelloTimeout(error)) unanswered = error;
         throw error;
       });
@@ -1491,7 +1519,7 @@ export class JsonRpcClient extends EventEmitter {
     const hasMethod = typeof message.method === 'string';
     const hasId = message.id != null;
     // Inbound request: has BOTH `method` and `id` (daemon → client reverse RPC,
-    // §5.14). The `id` is preserved verbatim (client-side ids are numeric while
+    // §5.14). The `id` is preserved verbatim (client-side ids are numeric or diagnostic trace strings;
     // daemon-issued reverse ids live in the `rev-<n>` string namespace); a
     // daemon-issued response could never carry `method`, so the two branches
     // do not overlap.
@@ -1503,16 +1531,16 @@ export class JsonRpcClient extends EventEmitter {
       );
       return;
     }
-    // Response: correlate by numeric id against a pending outbound request.
+    // Response: preserve traced string ids, with legacy numeric-string compatibility.
     if (hasId) {
-      const numericId = Number(message.id);
-      const entry = this.pending.get(numericId);
-      if (entry) {
-        this.pending.delete(numericId);
+      const id = responseRequestId(this.pending, message.id);
+      const entry = id === undefined ? undefined : this.pending.get(id);
+      if (entry && id !== undefined) {
+        this.pending.delete(id);
         clearTimeout(entry.timeout);
         this.observeFrame(() => ({
           type: 'response',
-          key: `out:${numericId}`,
+          key: `out:${id}`,
           status: message.error ? 'error' : 'success',
           payload:
             message.error ??

@@ -26,6 +26,7 @@
     "dev:ui": "cross-env INTENT_UI_PREVIEW=1 node scripts/pnpm-run.mjs dev:web",
     "sandbox:shot": "node scripts/sandbox/shot.mjs",
     "sandbox:probe": "node scripts/sandbox/probe.mjs",
+    "perf:interaction-latency": "node scripts/perf/interaction-latency.mjs",
     "perf:chat-motion": "node scripts/perf/chat-motion-trace.mjs",
     "perf:text-rebase": "node scripts/perf/text-rebase-bench.mjs",
     "dev:electron": "node scripts/dev-electron.js",

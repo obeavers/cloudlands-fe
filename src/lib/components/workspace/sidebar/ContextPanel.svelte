@@ -34,6 +34,7 @@
   import ContextItemRow from './ContextItemRow.svelte';
   import McpServersSection from './McpServersSection.svelte';
   import SkillsSection from './SkillsSection.svelte';
+  import ExperimentalMemorySection from '$features/knowledge/ExperimentalMemorySection.svelte';
   import NotesPanel from './NotesPanel.svelte';
   import WorkspaceStatusImage from './WorkspaceStatusImage.svelte';
   import { ContextPickerModal } from './context-picker';
@@ -370,6 +371,7 @@
 
       <!-- Skills Section -->
       <SkillsSection {workspaceId} />
+      <ExperimentalMemorySection {workspaceId} />
       <ContextAttachmentsSection {workspaceId} attachments={$contextAttachments$} />
     {/if}
   </div>
