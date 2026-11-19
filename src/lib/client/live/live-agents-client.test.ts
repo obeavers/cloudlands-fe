@@ -31,6 +31,34 @@ describe('LiveAgentsClient mutations (fake transport)', () => {
     resetMockBackend();
   });
 
+  it('forwards the exact human-confirmed task revision on agent.create', async () => {
+    backend.onRequest('agent.create', () => ({
+      agent: { id: 'agent-pinned', workspaceId: 'w', name: 'Pinned' },
+    }));
+    const expectedTaskRevision = {
+      workspaceId: 'w',
+      noteId: 'task',
+      rev: 7,
+      digest: 'exact-source',
+      projectionSchemaVersion: 1 as const,
+    };
+    const agent = await new LiveAgentsClient().create({
+      workspaceId: 'w',
+      metadata: { taskNoteId: 'task' },
+      expectedTaskRevision,
+    });
+    expect(backend.requests).toContainEqual({
+      method: 'agent.create',
+      params: {
+        workspaceId: 'w',
+        idempotencyKey: expect.any(String),
+        metadata: { taskNoteId: 'task' },
+        expectedTaskRevision,
+      },
+    });
+    expect(agent.id).toBe('agent-pinned');
+  });
+
   it.each([
     new Error('connection lost after enqueue'),
     new BackendError(

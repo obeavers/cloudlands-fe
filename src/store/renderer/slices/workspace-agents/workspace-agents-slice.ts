@@ -10,6 +10,7 @@ import type {
   AgentScopeCounts,
 } from '$shared/types';
 import type { UnifiedAgentConfig } from '$shared/types/agent.types';
+import type { TaskRevisionRef } from '$shared/types/work';
 import type { AgentPermissionPolicy } from '$shared/types/agent-session';
 import { isBackgroundAgentSession } from '$shared/utils/agent-scope';
 import { createAction, createAsyncAction } from '@themislib/themis/utils/store/create-action';
@@ -508,7 +509,13 @@ export const delegateExistingTaskRequested = createAction<
   [wsId: string, noteId: string, taskText: string, openAgent?: boolean]
 >('workspaceAgents/delegateExistingTaskRequested');
 export const runAgentForNoteRequested = createAction<
-  [wsId: string, noteId: string, noteTitle?: string]
+  [
+    wsId: string,
+    noteId: string,
+    noteTitle?: string,
+    expectedTaskRevision?: TaskRevisionRef,
+    expectedAdmission?: string,
+  ]
 >('workspaceAgents/runAgentForNoteRequested');
 export const agentsLoaded = createAction<[wsId: string]>('workspaceAgents/agentsLoaded');
 export const setWaitingForFirstMessage = createAction<

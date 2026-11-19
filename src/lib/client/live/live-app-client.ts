@@ -1,3 +1,7 @@
+import { captureNeutralWorkspaceClients } from './neutral-workspace-client';
+import { resolveBackendTransport } from './backend-transport-factory';
+import { VcsClient, type VcsServicePort } from './vcs-client';
+import { WorkClient, type WorkServicePort } from './work-client';
 /**
  * Live AppClient composition.
  *
@@ -45,6 +49,26 @@ import { LiveTerminalsClient } from './live-terminals-client';
 import { LiveWorkspacesClient } from './live-workspaces-client';
 
 export class LiveAppClient implements AppClient {
+  declare readonly vcs?: VcsClient;
+  declare readonly work?: WorkClient;
+
+  constructor(services?: { vcs?: VcsServicePort; work?: WorkServicePort }) {
+    if (services?.vcs) this.vcs = new VcsClient(services.vcs);
+    if (services?.work) this.work = new WorkClient(services.work);
+  }
+
+  captureNeutralWorkspace(workspaceId: string) {
+    const transport = resolveBackendTransport();
+    return captureNeutralWorkspaceClients(transport, workspaceId);
+  }
+
+  onNeutralWorkspaceReady(handler: () => void) {
+    const transport = resolveBackendTransport();
+    return transport.onNeutralWorkspaceReady
+      ? transport.onNeutralWorkspaceReady(handler)
+      : transport.onReconnected(handler);
+  }
+
   // All domains are now live.
   readonly workspaces = new LiveWorkspacesClient();
   readonly agents = new LiveAgentsClient();

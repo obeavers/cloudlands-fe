@@ -1,3 +1,4 @@
+import { taskConfirmationSaga } from './slices/task-confirmation/sagas/task-confirmation-saga';
 import { dockConversationSaga } from './slices/dock-conversation/sagas/dock-conversation-saga';
 import { desktopControlSaga } from './slices/desktop-control/sagas/desktop-control-saga';
 import { workspaceDiscussionSaga } from './slices/workspace-discussion/sagas/workspace-discussion-saga';
@@ -80,6 +81,8 @@ import { acceptWorkflowObserverSaga } from './slices/accept-workflow/sagas/accep
 import { prWorkflowSaga } from './slices/pr-workflow/sagas/pr-workflow-saga';
 import { chatChangesSaga } from './slices/chat-changes/sagas/chat-changes-saga';
 import { acceptChangesStatusSaga } from './slices/git/sagas/accept-changes-status-saga';
+import { neutralReadModelSaga } from './slices/vcs/sagas/neutral-read-model-saga';
+import { memoryReadSaga } from './slices/memory-read/sagas/memory-read-saga';
 import { gitRootsSaga } from './slices/git-roots/sagas/git-roots-saga';
 import { githubRepoSearchSaga } from './slices/github-repo-search/sagas/github-repo-search-saga';
 import { importableSessionsSaga } from './slices/importable-sessions/sagas/importable-sessions-saga';
@@ -271,6 +274,9 @@ export const sagas = [
   prMonitorSaga,
   scriptMonitorSaga,
   agentWorkersSaga,
+  neutralReadModelSaga,
+  memoryReadSaga,
+  taskConfirmationSaga,
   gitRootsSaga,
   uiLayoutPersistenceSaga,
   tabStateSaga,

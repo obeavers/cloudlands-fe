@@ -11,6 +11,7 @@
  * hook (scripts/notarize.js) along with the rest of the app bundle. No separate signing
  * step is required here.
  */
+const atomicHost = require('./atomic-host-payload.cjs');
 const fs = require('fs');
 const path = require('path');
 
@@ -71,5 +72,20 @@ if (process.platform !== 'win32') {
   fs.chmodSync(destBin, 0o755);
 }
 
+const targetByPlatform = {
+  'darwin-arm64': 'aarch64-apple-darwin',
+  'darwin-x64': 'x86_64-apple-darwin',
+  'linux-x64': 'x86_64-unknown-linux-musl',
+  'linux-arm64': 'aarch64-unknown-linux-musl',
+  'win32-x64': 'x86_64-pc-windows-msvc',
+};
+const hostSource =
+  process.env.INTENT_ATOMIC_HOST_DIR?.trim() ||
+  path.join(MONOREPO_DIR, 'packages/intentd/packaging/libexec/atomic-host');
+atomicHost.stagePayload(
+  hostSource,
+  destDir,
+  process.env.INTENTD_TARGET?.trim() || targetByPlatform[`${process.platform}-${process.arch}`],
+);
 console.log(`Copied intentd binary to ${destBin}`);
 console.log(`Source: ${sourceBin}`);

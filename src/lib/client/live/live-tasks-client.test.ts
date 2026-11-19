@@ -13,6 +13,7 @@ let reconnectHandlers: Array<() => void> = [];
 
 vi.mock('./backend-transport', () => ({
   backendRequest: vi.fn(),
+  observeBackendNodeCapabilities: vi.fn(),
   onBackendNotification: vi.fn((handler: (n: { method: string; params?: unknown }) => void) => {
     notifyHandlers.push(handler);
     return () => {
@@ -32,7 +33,7 @@ vi.mock('./live-support', async (importActual) => {
   return { ...actual, resolveNoteWorkspaceId: vi.fn(() => Promise.resolve('ws-1')) };
 });
 
-import { backendRequest } from './backend-transport';
+import { backendRequest, observeBackendNodeCapabilities } from './backend-transport';
 import { resolveNoteWorkspaceId } from './live-support';
 import { LiveTasksClient } from './live-tasks-client';
 
@@ -40,6 +41,88 @@ const mockedRequest = vi.mocked(backendRequest);
 const mockedResolve = vi.mocked(resolveNoteWorkspaceId);
 
 describe('LiveTasksClient mutations (fake transport)', () => {
+  it('negotiates planning from the acknowledged hello without a request', async () => {
+    vi.mocked(observeBackendNodeCapabilities).mockResolvedValue({
+      server: { capabilities: { taskPlanning: 1 } },
+    });
+    expect(await new LiveTasksClient().supportsPlanning()).toBe(true);
+    vi.mocked(observeBackendNodeCapabilities).mockResolvedValue({ server: { capabilities: {} } });
+    expect(await new LiveTasksClient().supportsPlanning()).toBe(false);
+    expect(mockedRequest).not.toHaveBeenCalled();
+  });
+
+  it('confirms criteria and file declarations with one exact CAS request and keeps the server revision', async () => {
+    const input = {
+      workspaceId: 'explicit-workspace',
+      noteId: 'task',
+      expectedNoteVersion: 7,
+      acceptanceCriteria: ['  Raw café text.\n'],
+      workDefinition: {
+        purpose: 'research' as const,
+        criteria: [],
+        files: [{ rootId: 'primary', path: 'src/input.bin', role: 'reference' as const }],
+      },
+    };
+    const taskRevision = {
+      workspaceId: input.workspaceId,
+      noteId: 'task',
+      rev: 8,
+      digest: 'retained',
+      projectionSchemaVersion: 1,
+    };
+    mockedRequest.mockResolvedValueOnce({
+      note: {
+        id: 'task',
+        workspaceId: input.workspaceId,
+        rev: 8,
+        title: 'Task',
+        content: 'Body',
+        metadata: {
+          task: {
+            status: 'not_started',
+            acceptanceCriteria: input.acceptanceCriteria,
+            workDefinition: input.workDefinition,
+          },
+        },
+      },
+      taskRevision,
+    });
+    const confirmed = await new LiveTasksClient().configureWorkDefinition(input);
+    expect(mockedRequest).toHaveBeenCalledExactlyOnceWith('task.configureWorkDefinition', input);
+    expect(mockedResolve).not.toHaveBeenCalled();
+    expect(confirmed.taskRevision).toEqual(taskRevision);
+    expect(confirmed.note.metadata?.task?.acceptanceCriteria).toEqual(input.acceptanceCriteria);
+    expect(confirmed.note.metadata?.task?.workDefinition).toEqual(input.workDefinition);
+    expect(confirmed.note.metadata?.task?.status).toBe('not_started');
+  });
+
+  it('refuses a mismatched confirmation and propagates a source conflict without a legacy write fallback', async () => {
+    const input = {
+      workspaceId: 'w',
+      noteId: 't',
+      expectedNoteVersion: 1,
+      acceptanceCriteria: [],
+      workDefinition: null,
+    };
+    mockedRequest.mockResolvedValueOnce({
+      note: { id: 'different', rev: 2, metadata: { task: { status: 'not_started' } } },
+      taskRevision: {
+        workspaceId: 'w',
+        noteId: 't',
+        rev: 2,
+        digest: 'd',
+        projectionSchemaVersion: 1,
+      },
+    });
+    await expect(new LiveTasksClient().configureWorkDefinition(input)).rejects.toThrow(
+      'does not match',
+    );
+    const conflict = Object.assign(new Error('source changed'), { rpcCode: -32009 });
+    mockedRequest.mockRejectedValueOnce(conflict);
+    await expect(new LiveTasksClient().configureWorkDefinition(input)).rejects.toBe(conflict);
+    expect(mockedRequest).toHaveBeenCalledTimes(2);
+  });
+
   afterEach(() => {
     vi.clearAllMocks();
     mockedResolve.mockResolvedValue('ws-1');

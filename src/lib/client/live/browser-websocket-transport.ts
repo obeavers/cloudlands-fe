@@ -1,3 +1,7 @@
+import { captureNeutralWorkspaceSession } from '$shared/neutral-workspace-session';
+import type { NeutralWorkspaceContext } from '$shared/types/neutral-workspace';
+import { beginLatencyRequest } from './latency-recorder';
+import { requestTraceId, responseRequestId } from '$shared/request-latency';
 import { BrowserMonitorAttachment } from './browser-monitor-attachment';
 import { supportsReviewMonitoring, type PrMonitorSession } from '$shared/types/pr-monitor';
 /**
@@ -22,7 +26,11 @@ import { supportsReviewMonitoring, type PrMonitorSession } from '$shared/types/p
  */
 import type { PrincipalDiscovery } from '$shared/types/principal';
 import { parseProtocolVersion, type ProtocolVersion } from '$shared/protocol-version';
-import { pickNodeCapabilities, type NodeCapabilitySnapshot } from '$shared/node-capabilities';
+import {
+  pickNodeCapabilities,
+  isTaskPlanningRequest,
+  type NodeCapabilitySnapshot,
+} from '$shared/node-capabilities';
 import { assertScopedFileReadSupport } from '$shared/root-file-read-support';
 import {
   classifyStartupReply,
@@ -275,6 +283,7 @@ export class BrowserWebSocketTransport implements BackendTransport {
   private reviewMonitoringEnabled = false;
   private ordinaryHello = false;
   private monitorRetry: ReturnType<typeof setTimeout> | null = null;
+  private readonly neutralRetirements = new Set<() => void>();
   private readonly monitorRetirements = new Set<() => void>();
   private readonly monitorReady = new Set<() => void>();
   /** This socket's `client.hello` version, parsed once when the hello answers. */
@@ -283,7 +292,7 @@ export class BrowserWebSocketTransport implements BackendTransport {
     code: 'UNAVAILABLE',
     message: 'client.hello has not completed on this connection',
   });
-  private readonly pending = new Map<number, PendingRequest>();
+  private readonly pending = new Map<number | string, PendingRequest>();
   /** A successful connection or failed dial requires recovery on the next connect. */
   private hasBeenConnected = false;
   private hasConnectionFailed = false;
@@ -362,6 +371,13 @@ export class BrowserWebSocketTransport implements BackendTransport {
     if (this.disposed || !this.connected || this.socket !== socket)
       throw new BackendError({ code: 'UNAVAILABLE', message: 'Backend connection changed' });
     return { server: { capabilities: this.nodeCapabilities } };
+  }
+
+  onNeutralWorkspaceReady(handler: () => void) {
+    this.monitorReady.add(handler);
+    return () => {
+      this.monitorReady.delete(handler);
+    };
   }
 
   onMonitorReconnected(handler: () => void): () => void {
@@ -502,18 +518,30 @@ export class BrowserWebSocketTransport implements BackendTransport {
     };
   }
 
-  request<T = unknown>(
+  async request<T = unknown>(
     method: string,
     params?: unknown,
     options?: BackendRequestOptions,
   ): Promise<T> {
-    return this.requestOnSocket(method, params, options);
+    const trace = beginLatencyRequest(method, options?.interactionTraceId);
+    try {
+      const result = await this.requestOnSocket<T>(
+        method,
+        params,
+        trace ? { ...options, traceId: trace.traceId } : options,
+      );
+      trace?.finish('success');
+      return result;
+    } catch (error) {
+      trace?.finish('error');
+      throw error;
+    }
   }
 
   private requestOnSocket<T = unknown>(
     method: string,
     params?: unknown,
-    options?: BackendRequestOptions,
+    options?: BackendRequestOptions & { traceId?: string },
     handshakeSocket?: BrowserWebSocketLike,
   ): Promise<T> {
     if (options?.localMachine) {
@@ -529,6 +557,20 @@ export class BrowserWebSocketTransport implements BackendTransport {
         new BackendError({ code: 'UNAVAILABLE', message: 'Backend transport disposed' }),
       );
     }
+    if (
+      isTaskPlanningRequest(method, params) &&
+      (!this.connected ||
+        !this.socket ||
+        !this.helloConfirmed ||
+        this.nodeCapabilities?.taskPlanning !== 1)
+    ) {
+      return Promise.reject(
+        new BackendError({
+          code: 'TASK_PLANNING_UNAVAILABLE',
+          message: 'TASK_PLANNING_UNAVAILABLE',
+        }),
+      );
+    }
     // A starting daemon rejects every ordinary request; refuse it here with the
     // same structured error instead of queueing it. Callers recover on
     // `reconnected`, which fires once the daemon is ready.
@@ -537,7 +579,11 @@ export class BrowserWebSocketTransport implements BackendTransport {
         new BackendError(toBackendErrorPayload(startupErrorShape(this.startupState))),
       );
     }
-    const id = ++this.requestId;
+    const id = requestTraceId(options?.traceId) ?? ++this.requestId;
+    if (this.pending.has(id))
+      return Promise.reject(
+        new BackendError({ code: 'TRANSPORT_ERROR', message: 'Duplicate request trace id' }),
+      );
     const override = options?.timeoutMs;
     const timeoutMs =
       typeof override === 'number' && Number.isFinite(override) && override > 0
@@ -610,6 +656,7 @@ export class BrowserWebSocketTransport implements BackendTransport {
           this.nodeCapabilities = null;
           this.reviewMonitoring = undefined;
           for (const retire of [...this.monitorRetirements]) retire();
+          for (const retire of [...this.neutralRetirements]) retire();
           this.acknowledgedHello = null;
         }
         this.pending.set(id, {
@@ -659,6 +706,40 @@ export class BrowserWebSocketTransport implements BackendTransport {
       } else {
         this.ensureConnected().then(send, fail);
       }
+    });
+  }
+
+  async captureNeutralWorkspace(workspaceId: string): Promise<NeutralWorkspaceContext> {
+    const socket = this.socket;
+    const generation = this.capabilityHelloGeneration;
+    const hello = structuredClone(this.acknowledgedHello);
+    const current = () =>
+      !this.disposed &&
+      this.connected &&
+      this.socket === socket &&
+      this.capabilityHelloGeneration === generation &&
+      this.ordinaryHello &&
+      this.helloConfirmed;
+    if (!socket || !current())
+      throw new BackendError({ code: 'UNAVAILABLE', message: 'NEUTRAL_WORKSPACE_UNAVAILABLE' });
+    return captureNeutralWorkspaceSession(workspaceId, {
+      hello,
+      isCurrent: current,
+      // Exact socket path never invokes ensureConnected or renegotiates hello.
+      request: (method, params) => this.requestOnSocket(method, params, undefined, socket),
+      // WebSocket message dispatch runs notification callbacks synchronously;
+      // the fence reply continuation follows every preceding physical message.
+      onNotification: (handler) =>
+        this.onNotification((notification) => {
+          if (current()) handler(notification);
+        }),
+      onRetired: (handler) => {
+        this.neutralRetirements.add(handler);
+        if (!current()) handler();
+        return () => {
+          this.neutralRetirements.delete(handler);
+        };
+      },
     });
   }
 
@@ -910,12 +991,12 @@ export class BrowserWebSocketTransport implements BackendTransport {
       });
       return;
     }
-    // Response: correlate by numeric id against a pending outbound request.
+    // Response: preserve traced string ids, with legacy numeric-string compatibility.
     if (hasId) {
-      const numericId = Number(message.id);
-      const entry = this.pending.get(numericId);
-      if (!entry) return;
-      this.pending.delete(numericId);
+      const id = responseRequestId(this.pending, message.id);
+      const entry = id === undefined ? undefined : this.pending.get(id);
+      if (!entry || id === undefined) return;
+      this.pending.delete(id);
       clearTimeout(entry.timeout);
       if (message.error) {
         entry.reject(new BackendError(toBackendErrorPayload(message.error)));
@@ -991,6 +1072,7 @@ export class BrowserWebSocketTransport implements BackendTransport {
     this.reviewMonitoring = undefined;
     this.clearMonitorRecovery();
     for (const retire of [...this.monitorRetirements]) retire();
+    for (const retire of [...this.neutralRetirements]) retire();
     this.acknowledgedHello = null;
     this.nodeCapabilities = null;
     this.capabilityHelloGeneration += 1;

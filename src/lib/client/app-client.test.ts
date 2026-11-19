@@ -34,6 +34,12 @@ describe('appClient seam (all domains live)', () => {
     vi.stubGlobal('window', originalWindow);
   });
 
+  it('leaves neutral ports absent until authorized services are injected', () => {
+    expect(appClient.vcs).toBeUndefined();
+    expect(appClient.work).toBeUndefined();
+    expect(mockInvoke).not.toHaveBeenCalled();
+  });
+
   it('routes skills.list through LiveSkillsClient to daemon skill.list RPC', async () => {
     mockInvoke.mockResolvedValue({
       ok: true,

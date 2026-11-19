@@ -82,6 +82,8 @@ export interface BackendNotification {
 
 /** Per-call options for `BackendTransport.request`. */
 export interface BackendRequestOptions {
+  /** Diagnostic context from beginInteraction; never serialized into daemon method params. */
+  interactionTraceId?: string;
   /** Address this desktop's daemon from a window bound to another device. */
   localMachine?: boolean;
   /**
@@ -125,6 +127,12 @@ export interface BoundRepositoryRoute {
  * the underlying bridge is unavailable.
  */
 export interface BackendTransport {
+  /** A new ordinary acknowledged hello may admit an experimental workspace capture. */
+  onNeutralWorkspaceReady?(handler: () => void): () => void;
+  /** Experimental, read-only, exact acknowledged connection and principal. */
+  captureNeutralWorkspace?(
+    workspaceId: string,
+  ): Promise<import('$shared/types/neutral-workspace').NeutralWorkspaceContext>;
   onMonitorReconnected?(handler: () => void): () => void;
   capturePrMonitorSession?(
     workspaceId: string,

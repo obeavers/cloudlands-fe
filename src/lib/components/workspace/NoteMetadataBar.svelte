@@ -8,6 +8,8 @@
   import AgentAvatar from '$features/agent/components/agent-avatar/AgentAvatar.svelte';
   import TaskStatusIndicator from './TaskStatusIndicator.svelte';
   import TaskRelationLink from './TaskRelationLink.svelte';
+  import TaskPlanEditor from '$features/task-planning/TaskPlanEditor.svelte';
+  import TaskRunEvidence from '$features/task-planning/TaskRunEvidence.svelte';
   import Fa from 'svelte-fa';
   import { faPlay } from '@fortawesome/free-solid-svg-icons';
   import {
@@ -232,7 +234,7 @@
         <div class="text-subtle pt-0.5">{m.workspace_noteMetadataBar_assignee_label()}</div>
         <div class="flex flex-col gap-0.5 min-h-6 min-w-0 overflow-hidden">
           {#if assignedAgents.length === 0}
-            {#if !$hidesAgentLifecycleActions$}
+            {#if !$hidesAgentLifecycleActions$ && !taskMetadata.workDefinition}
               <Button
                 variant="ghost"
                 size="icon-compact"
@@ -258,7 +260,7 @@
                   >
                 </Button>
               {/each}
-              {#if !$hidesAgentLifecycleActions$}
+              {#if !$hidesAgentLifecycleActions$ && !taskMetadata.workDefinition}
                 <Button
                   variant="ghost"
                   size="icon-compact"
@@ -316,6 +318,19 @@
           </div>
         </div>
       {/if}
+      {#if !$hidesAgentLifecycleActions$ && !isComplete}
+        {#key `${workspaceId}:${note.id}`}<TaskPlanEditor
+            {note}
+            workspaceId={String(workspaceId)}
+          />{/key}
+      {/if}
+      {#key `${workspaceId}:${note.id}:evidence`}
+        <TaskRunEvidence
+          workspaceId={String(workspaceId)}
+          noteId={String(note.id)}
+          currentNoteRev={note.rev}
+        />
+      {/key}
     </div>
   </div>
 {/if}

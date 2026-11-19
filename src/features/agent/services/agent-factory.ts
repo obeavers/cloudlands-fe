@@ -462,11 +462,25 @@ export class UnifiedAgentFactory {
           normalized.nameExplicitlySet,
           normalized.placement,
           normalized.rememberSpecialist,
+          normalized.expectedTaskRevision,
         );
         metrics.backendCreationTime = Date.now() - backendStart;
         // A late acknowledgement belongs to the original connection, not the
         // newly admitted backend. Do not publish its session or send its prompt.
         if (selectPrincipalActionContext.select(appStore.state) !== principalContext) {
+          if (normalized.expectedTaskRevision && backendResult.success && backendResult.agentId) {
+            const createdId = createAgentId(backendResult.agentId);
+            return {
+              success: false,
+              error: m.task_plan_retiredAllocation_error({ agentId: backendResult.agentId }),
+              agentId: createdId,
+              knownAllocation: {
+                workspaceId: String(workspace.id),
+                agentId: createdId,
+                initialMessageSent: false,
+              },
+            };
+          }
           return { success: false, error: m.agent_creation_createFailed_error() };
         }
 
@@ -721,6 +735,7 @@ export class UnifiedAgentFactory {
       name: normalizedName,
       placement: config.placement,
       rememberSpecialist: config.rememberSpecialist,
+      expectedTaskRevision: config.expectedTaskRevision,
       nameExplicitlySet: config.nameExplicitlySet, // Wire `nameExplicitlySet` — false marks a generated placeholder name
       workspaceId: config.workspaceId || (workspace.id as BrandedWorkspaceId),
       // A blank model or provider is "no choice" (an unloaded catalog yields ''):
@@ -779,6 +794,7 @@ export class UnifiedAgentFactory {
     nameExplicitlySet?: boolean,
     placement?: import('$shared/types/agent-node').AgentPlacement,
     rememberSpecialist?: boolean,
+    expectedTaskRevision?: UnifiedAgentConfig['expectedTaskRevision'],
   ): Promise<{
     success: boolean;
     agentId?: string;
@@ -794,6 +810,7 @@ export class UnifiedAgentFactory {
         String(agent.workspaceId),
       );
       const request = {
+        ...(expectedTaskRevision ? { expectedTaskRevision } : {}),
         ...(!guestManager && placement ? { placement } : {}),
         workspaceId: String(agent.workspaceId),
         ...(!guestManager ? { workspacePath } : {}),

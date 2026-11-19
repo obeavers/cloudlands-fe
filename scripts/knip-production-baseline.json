@@ -744,7 +744,6 @@
       "readAllChunks"
     ],
     "src/lib/client/live/delta-subscription.ts": [
-      "DeltaReconciler",
       "parseSubscriptionPush"
     ],
     "src/lib/client/live/live-chat-client.ts": [
@@ -752,9 +751,6 @@
     ],
     "src/lib/client/live/live-clients-client.ts": [
       "__resetOwnClientIdForTesting"
-    ],
-    "src/lib/client/live/live-notes-client.ts": [
-      "normalizeNote"
     ],
     "src/lib/client/live/live-prompt-enhancement.ts": [
       "generateLayout"
@@ -2798,7 +2794,6 @@
       "WorkspaceTabMoveDirection"
     ],
     "src/lib/client/live/delta-subscription.ts": [
-      "DeltaPayload",
       "SubscriptionPush"
     ],
     "src/lib/components/chat/chat-panel-draft.svelte.ts": [

@@ -1,4 +1,5 @@
 import type { AgentPlacement } from './agent-node';
+import type { TaskRevisionRef } from './work';
 /**
  * Agent System Type Definitions
  *
@@ -132,6 +133,8 @@ import type { AgentSession } from './agent-session';
  * - Otherwise, a default name is generated based on workspace title
  */
 export interface UnifiedAgentConfig {
+  /** Human-confirmed task source; the daemon fences assignment and first admission. */
+  expectedTaskRevision?: TaskRevisionRef;
   placement?: AgentPlacement;
   // Required
   workspaceId: BrandedWorkspaceId;
@@ -230,4 +233,6 @@ export interface CreateAgentResult {
   cause?: unknown;
   agentId?: AgentId;
   sessionId?: AgentId;
+  /** Actual allocation acknowledged on a retired connection; no prompt was sent. */
+  knownAllocation?: { workspaceId: string; agentId: AgentId; initialMessageSent: false };
 }

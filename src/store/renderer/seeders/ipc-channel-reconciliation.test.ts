@@ -307,6 +307,20 @@ describe('IPC channel reconciliation (renderer invoke surface vs bridged channel
     }
   });
 
+  it('finds every neutral session invoke on the real captured preload transport', () => {
+    for (const key of ['CAPTURE', 'REQUEST', 'RELEASE'] as const) {
+      const channel = IPC_CHANNELS.BACKEND.NEUTRAL_WORKSPACE[key];
+      expect(invoked.get(channel)).toEqual([
+        expect.stringMatching(/^lib\/client\/live\/neutral-workspace-transport\.ts:\d+$/),
+      ]);
+      expect(LIVE_TRANSPORT_CHANNELS.has(channel)).toBe(true);
+    }
+    // JSON-RPC method names are not Electron channels. The captured transport
+    // sends them inside NEUTRAL_WORKSPACE.REQUEST on its original connection.
+    for (const method of ['events.subscribe', 'events.unsubscribe', 'events.fence'])
+      expect(invoked.has(method)).toBe(false);
+  });
+
   it.each([
     'channels.MISSING',
     'IPC_CHANNELS.BACKEND.REPOSITORY_RESOURCE.MISSING',
@@ -495,6 +509,13 @@ const LIVE_TRANSPORT_CHANNELS: ReadonlySet<string> = new Set([
   'backend:pr-monitor:capture',
   'backend:pr-monitor:request',
   'backend:pr-monitor:release',
+  // Neutral sessions capture the original real preload document and physical
+  // connection. Without that bridge/capability they refuse before any request;
+  // a mock bridge would bypass captured identity, retirement and ingress fences.
+  // neutral-workspace-lifecycle.test.ts exercises the captured main/client route.
+  'backend:neutral-workspace:capture',
+  'backend:neutral-workspace:request',
+  'backend:neutral-workspace:release',
   // Console-owner status query (#1928): main-process-owned state (which
   // window is the last-focused non-HUD window) invoked directly on the real
   // preload bridge (console-owner-status.ts guards on its presence; without

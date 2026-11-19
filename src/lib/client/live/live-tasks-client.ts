@@ -20,13 +20,18 @@ import type {
   TaskCheckboxStatus,
   TaskUpdatePatch,
   TasksClient,
+  TaskPlanConfiguration,
+  TaskPlanConfirmation,
   Unsubscribe,
 } from '../app-client';
 import type {
   TaskAgentAssociation,
   TaskAgentAssociationsByTaskKey,
 } from '$store/renderer/slices/task-agent-associations/task-agent-associations-types';
-import { backendRequest } from './backend-transport';
+import { backendRequest, observeBackendNodeCapabilities } from './backend-transport';
+import { TaskRevisionRefSchema } from '$shared/types/work';
+import { normalizeNote } from './live-notes-client';
+import { supportsTaskEvidenceRead, readTaskEvidence } from './task-evidence-client';
 import { createDeltaSubscription } from './delta-subscription';
 import {
   newIdempotencyKey,
@@ -202,6 +207,35 @@ function normalizeStats(raw: unknown): WorkspaceTaskStats {
 }
 
 export class LiveTasksClient implements TasksClient {
+  supportsEvidenceRead = supportsTaskEvidenceRead;
+  workEvidence = readTaskEvidence;
+  async supportsPlanning(): Promise<boolean> {
+    const hello = (await observeBackendNodeCapabilities()) as {
+      server?: { capabilities?: { taskPlanning?: unknown } };
+    } | null;
+    return hello?.server?.capabilities?.taskPlanning === 1;
+  }
+
+  async configureWorkDefinition(input: TaskPlanConfiguration): Promise<TaskPlanConfirmation> {
+    const raw = await backendRequest<{ note: Record<string, unknown>; taskRevision: unknown }>(
+      'task.configureWorkDefinition',
+      input,
+    );
+    const taskRevision = TaskRevisionRefSchema.parse(raw.taskRevision);
+    const note = normalizeNote(raw.note, input.workspaceId);
+    if (
+      note.id !== input.noteId ||
+      String(note.workspaceId) !== input.workspaceId ||
+      taskRevision.workspaceId !== input.workspaceId ||
+      taskRevision.noteId !== input.noteId ||
+      taskRevision.rev !== note.rev ||
+      !note.metadata?.task
+    ) {
+      throw new Error('Task plan confirmation does not match the requested source');
+    }
+    return { note, taskRevision };
+  }
+
   /**
    * `task.list` (PROTOCOL §5.4) → `{ tasks, stats }`. The BE owns the
    * `taskStats` rollup; the FE renders it verbatim. Tasks are also remembered

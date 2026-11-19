@@ -22,6 +22,7 @@ import {
   sanitizeWsUrlForDisplay,
 } from './browser-websocket-transport';
 import { CURRENT_PROTOCOL_VERSION } from '../../../test/current-protocol-version';
+import { beginLatencyRequest } from './latency-recorder';
 
 class FakeWebSocket implements BrowserWebSocketLike {
   onopen: ((event?: unknown) => void) | null = null;
@@ -106,19 +107,79 @@ function helloResult(clientId = 'browser-1') {
 }
 
 /** Complete the real connect handshake for tests exercising unrelated RPC behavior. */
-async function connect(socket: FakeWebSocket): Promise<void> {
+async function connect(
+  socket: FakeWebSocket,
+  capabilities?: Record<string, unknown>,
+): Promise<void> {
   socket.open();
   await flush();
   const hello = socket.lastFrame();
   expect(hello).toMatchObject({ method: 'client.hello' });
   socket.sent.pop();
-  socket.receive({ jsonrpc: '2.0', id: hello.id, result: helloResult() });
+  socket.receive({
+    jsonrpc: '2.0',
+    id: hello.id,
+    result: {
+      ...helloResult(),
+      server: {
+        ...helloResult().server,
+        capabilities: { ...helloResult().server.capabilities, ...capabilities },
+      },
+    },
+  });
   await flush();
 }
 
 afterEach(() => {
+  window.__INTENT_LATENCY__?.stop();
+  window.__INTENT_LATENCY__?.clear();
   vi.useRealTimers();
   vi.unstubAllGlobals();
+});
+
+describe('confirmed task planning dispatch', () => {
+  const pin = {
+    workspaceId: 'w',
+    noteId: 't',
+    rev: 7,
+    digest: 'retained',
+    projectionSchemaVersion: 1,
+  };
+  it('refuses before an acknowledged supporting socket exists instead of queuing', async () => {
+    const { transport, sockets } = createHarness();
+    await expect(
+      transport.request('agent.create', { expectedTaskRevision: pin }),
+    ).rejects.toMatchObject({ code: 'TASK_PLANNING_UNAVAILABLE' });
+    expect(sockets).toHaveLength(0);
+    transport.dispose();
+  });
+  it('uses the actual socket capability, preserves known allocation after retirement, and never retries on a replacement', async () => {
+    const { transport, socket } = createHarness();
+    const seed = transport.request('system.status');
+    await connect(socket(), { taskPlanning: 1 });
+    socket().receive({ id: socket().lastFrame().id, result: {} });
+    await seed;
+    socket().sent.length = 0;
+    const create = transport.request('agent.create', { expectedTaskRevision: pin });
+    const frame = socket().lastFrame();
+    const hello = transport.request('client.hello');
+    const replacement = socket().lastFrame();
+    await expect(
+      transport.request('agent.create', { expectedTaskRevision: pin }),
+    ).rejects.toMatchObject({ code: 'TASK_PLANNING_UNAVAILABLE' });
+    socket().receive({ id: frame.id, result: { agent: { id: 'known-original' } } });
+    await expect(create).resolves.toEqual({ agent: { id: 'known-original' } });
+    expect(socket().sent.filter((line) => JSON.parse(line).method === 'agent.create')).toHaveLength(
+      1,
+    );
+    socket().receive({ id: replacement.id, result: helloResult('replacement') });
+    await hello;
+    await expect(
+      transport.request('task.configureWorkDefinition', { workspaceId: 'w' }),
+    ).rejects.toMatchObject({ code: 'TASK_PLANNING_UNAVAILABLE' });
+    expect(socket().sent).toHaveLength(2);
+    transport.dispose();
+  });
 });
 
 describe('resolveBrowserWsUrl', () => {
@@ -186,6 +247,39 @@ describe('sanitizeWsUrlForDisplay', () => {
 });
 
 describe('BrowserWebSocketTransport', () => {
+  it('sends the opt-in trace as a string id and records the matched response without payloads', async () => {
+    const h = createHarness();
+    const opening = h.transport.request('host.status');
+    await connect(h.socket());
+    const first = h.socket().lastFrame();
+    h.socket().receive({ jsonrpc: '2.0', id: first.id, result: { ready: true } });
+    await opening;
+    beginLatencyRequest('workspace.list');
+    window.__INTENT_LATENCY__!.start();
+    try {
+      const pending = h.transport.request('workspace.list', { filter: 'active' });
+      const frame = h.socket().lastFrame();
+      expect(frame).toEqual({
+        jsonrpc: '2.0',
+        id: expect.stringMatching(/^latency-/),
+        method: 'workspace.list',
+        params: { filter: 'active' },
+      });
+      h.socket().receive({ jsonrpc: '2.0', id: frame.id, result: { workspaces: [] } });
+      await expect(pending).resolves.toEqual({ workspaces: [] });
+      expect(window.__INTENT_LATENCY__!.snapshot().samples).toEqual([
+        {
+          traceId: frame.id,
+          phase: 'request',
+          method: 'workspace.list',
+          outcome: 'success',
+          durationMs: expect.any(Number),
+        },
+      ]);
+    } finally {
+      h.transport.dispose();
+    }
+  });
   it('holds cold-start presence until client.hello succeeds on that socket', async () => {
     const { transport, socket } = createHarness();
     const presence = transport.request('presence.update', { focus: [], typing: null });
@@ -948,6 +1042,8 @@ describe('observational node capabilities', () => {
             workspaceMembershipEvents: 1,
             rawScreenshotRetention: 1,
             noteTruncatedRead: 1,
+            taskPlanning: 0,
+            taskEvidenceRead: 0,
             remoteMachines: 1,
             remoteInitialAgent: 1,
             remoteLinkTraffic: 1,
@@ -967,6 +1063,8 @@ describe('observational node capabilities', () => {
           rawScreenshotRetention: 1,
           chiefAttachments: 0,
           noteTruncatedRead: 1,
+          taskPlanning: 0,
+          taskEvidenceRead: 0,
           remoteMachines: 1,
           remoteInitialAgent: 1,
           remoteLinkTraffic: 1,
@@ -1024,6 +1122,8 @@ describe('observational node capabilities', () => {
           rawScreenshotRetention: 0,
           chiefAttachments: 0,
           noteTruncatedRead: 0,
+          taskPlanning: 0,
+          taskEvidenceRead: 0,
           remoteMachines: 0,
           remoteInitialAgent: 0,
           remoteLinkTraffic: 0,
@@ -1078,6 +1178,8 @@ describe('observational node capabilities', () => {
           rawScreenshotRetention: 0,
           chiefAttachments: 0,
           noteTruncatedRead: 0,
+          taskPlanning: 0,
+          taskEvidenceRead: 0,
           remoteMachines: 0,
           remoteInitialAgent: 0,
           remoteLinkTraffic: 0,
@@ -1312,6 +1414,8 @@ describe('monitor replacement hello admission', () => {
                 rawScreenshotRetention: 0,
                 chiefAttachments: 0,
                 noteTruncatedRead: 0,
+                taskPlanning: 0,
+                taskEvidenceRead: 0,
                 remoteMachines: 0,
                 remoteInitialAgent: 0,
                 remoteLinkTraffic: 0,
@@ -2024,5 +2128,90 @@ describe('daemon startup readiness (docs/protocol/startup-readiness.md)', () => 
     expect(harness.transport.getConnectionStatus()).toBe('connected');
     expect(harness.transport.getStartupState()).toBeNull();
     harness.transport.dispose();
+  });
+});
+
+describe('neutral workspace captured browser ingress', () => {
+  async function capturedHarness() {
+    const h = createHarness();
+    const pending = h.transport.request('system.status');
+    const socket = h.socket();
+    const originalSend = socket.send.bind(socket);
+    let nextLease = 0;
+    socket.send = (data) => {
+      originalSend(data);
+      const frame = JSON.parse(data);
+      const result =
+        frame.method === 'client.hello'
+          ? {
+              ...helloResult(),
+              server: {
+                ...helloResult().server,
+                capabilities: { vcs: 1, workEvidence: 1, eventStreamRecovery: 1 },
+              },
+            }
+          : frame.method === 'principal.me'
+            ? {
+                id: 'browser-principal',
+                login: null,
+                displayName: null,
+                avatarUrl: null,
+                isAdministrator: true,
+              }
+            : frame.method === 'events.subscribe'
+              ? { subscriptionId: `browser-lease-${++nextLease}`, lossRecovery: 1 }
+              : frame.method === 'events.fence'
+                ? { subscriptionIds: frame.params.subscriptionIds }
+                : {};
+      queueMicrotask(() => socket.receive({ jsonrpc: '2.0', id: frame.id, result }));
+    };
+    socket.open();
+    await pending;
+    const context = await h.transport.captureNeutralWorkspace('ws');
+    return { ...h, socket, context };
+  }
+  it('processes a physical loss before resolving its following fence and never creates a replacement socket', async () => {
+    const h = await capturedHarness();
+    const lease = (await h.context.subscribe({
+      workspaceId: 'ws',
+      eventTypes: ['vcs:delta'],
+      lossRecovery: 1,
+    })) as { subscriptionId: string };
+    const order: string[] = [];
+    h.context.onNotification((notice) => order.push(notice.method));
+    h.socket.receive({
+      jsonrpc: '2.0',
+      method: 'events.lost',
+      params: {
+        subscriptionId: lease.subscriptionId,
+        generation: '1',
+        scope: { workspaceId: 'ws' },
+      },
+    });
+    await h.context.fenceEvents([lease.subscriptionId]);
+    order.push('fence');
+    expect(order).toEqual(['events.lost', 'fence']);
+    expect(h.sockets).toHaveLength(1);
+    await h.context.release();
+    h.transport.dispose();
+  });
+  it('retires on acknowledged identity replacement and refuses stale captured requests', async () => {
+    const h = await capturedHarness();
+    const retired = vi.fn();
+    h.context.onRetired(retired);
+    await h.transport.request('client.hello', {});
+    expect(retired).toHaveBeenCalledOnce();
+    expect(h.context.isCurrent()).toBe(false);
+    const before = h.socket.sent.length;
+    await expect(h.context.request('vcs.subscribe', { workspaceId: 'ws' })).rejects.toThrow();
+    expect(h.socket.sent).toHaveLength(before);
+    await h.context.release();
+    h.transport.dispose();
+  });
+  it('does no dialing when an acknowledged neutral capability is absent', async () => {
+    const h = createHarness();
+    await expect(h.transport.captureNeutralWorkspace('ws')).rejects.toThrow();
+    expect(h.sockets).toHaveLength(0);
+    h.transport.dispose();
   });
 });
