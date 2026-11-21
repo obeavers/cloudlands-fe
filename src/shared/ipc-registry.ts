@@ -337,6 +337,28 @@ export const IPC_CHANNELS = {
     DISMISS: 'invite-notice:dismiss',
   },
 
+  // Browser panel passkeys (Linux). Payload contracts live in src/shared/ipc/passkeys.ts.
+  PASSKEYS: {
+    /** Browser-panel frame preload → main (invoke): navigator.credentials.create. */
+    PAGE_CREATE: 'passkeys:page-create',
+    /** Browser-panel frame preload → main (invoke): navigator.credentials.get. */
+    PAGE_GET: 'passkeys:page-get',
+    /** Browser-panel frame preload → main (invoke): the page aborted its request. */
+    PAGE_CANCEL: 'passkeys:page-cancel',
+    /** Browser-panel frame preload → main (invoke): platform authenticator availability. */
+    PAGE_CAPABILITIES: 'passkeys:page-capabilities',
+    /** Main → host renderer: show or update the passkey dialog. */
+    DIALOG_SHOW: 'passkeys:dialog-show',
+    /** Main → host renderer: close the passkey dialog. */
+    DIALOG_CLOSE: 'passkeys:dialog-close',
+    /** Host renderer → main (invoke): the user answered the passkey dialog. */
+    DIALOG_RESPOND: 'passkeys:dialog-respond',
+    /** App renderer → main (invoke): list device passkeys (Settings → Passkeys). */
+    DEVICE_LIST: 'passkeys:device-list',
+    /** App renderer → main (invoke): delete one device passkey. */
+    DEVICE_DELETE: 'passkeys:device-delete',
+  },
+
   // Window Management
   WINDOW: {
     RELOAD: 'window:reload',
@@ -586,6 +608,21 @@ export const IPC_CHANNELS = {
     OPEN: 'dialog:open',
   },
 
+  // In-app file dialogs (INTENT_IN_APP_PICKER, Intent OS). Main pushes REQUEST
+  // to the shown renderer (also in EVENT_CHANNELS); the renderer lists the
+  // frontend host's folders with LIST_DIRECTORY / CREATE_DIRECTORY while that
+  // request is open and answers with RESPOND. PICK_FILES backs renderer file
+  // inputs: main runs the in-app open dialog and returns the picked files.
+  IN_APP_FILE_DIALOG: {
+    REQUEST: 'in-app-file-dialog:request',
+    RESPOND: 'in-app-file-dialog:respond',
+    LIST_DIRECTORY: 'in-app-file-dialog:list-directory',
+    CREATE_DIRECTORY: 'in-app-file-dialog:create-directory',
+    PICK_FILES: 'in-app-file-dialog:pick-files',
+    /** An app renderer that can show the picker announces itself (renderer->main). */
+    HOST_READY: 'in-app-file-dialog:host-ready',
+  },
+
   // Voice (local OS transcription — macOS Speech.framework helper)
   VOICE: {
     /** Whether the local OS transcription engine is available on this host */
@@ -695,6 +732,54 @@ export const IPC_CHANNELS = {
     TAB_OWNER_CHANGED: 'browser:tab-owner-changed',
     /** Clear main's registrations for a deleted agent's owned tabs (renderer->main) */
     CLEAR_AGENT_TABS: 'browser:clear-agent-tabs',
+  },
+
+  // Main-owned browser views (BrowserViewService, Labs: off by default)
+  BROWSER_VIEW: {
+    /** Read the Labs setting (renderer->main) */
+    GET_LAB: 'browser-view:get-lab',
+    /** Change the Labs setting (renderer->main) */
+    SET_LAB: 'browser-view:set-lab',
+    /** Create (or reuse) a tab's main-owned page in the sender's window (renderer->main) */
+    CREATE: 'browser-view:create',
+    /** Close a tab's page: the tab closed (renderer->main) */
+    DESTROY: 'browser-view:destroy',
+    /** A tab's live page state, or null when main has no page for it (renderer->main) */
+    STATE: 'browser-view:state',
+    /** Close every page of a workspace: archived or deleted (renderer->main) */
+    DESTROY_WORKSPACE: 'browser-view:destroy-workspace',
+    /** The tab's box in CSS pixels and whether it is on screen (renderer->main) */
+    SET_PLACEMENT: 'browser-view:set-placement',
+    /** Take a tab's page off screen; the page stays alive (renderer->main) */
+    DETACH: 'browser-view:detach',
+    /** A command from the tab's controls (renderer->main) */
+    COMMAND: 'browser-view:command',
+    /** A page event for the renderer that shows the tab (main->renderer event) */
+    EVENT: 'browser-view:event',
+  },
+
+  // Tab windows: a panel tab in a window of its own
+  TAB_WINDOW: {
+    /** Move a tab of the sender's window to a new tab window (renderer->main) */
+    OPEN: 'tab-window:open',
+    /** The sender's tab window record, or null (renderer->main) */
+    GET: 'tab-window:get',
+    /** The tab window's tab changed: title, URL, favicon (renderer->main) */
+    UPDATE: 'tab-window:update',
+    /** Move the sender's tab back to the window it came from (renderer->main) */
+    MOVE_BACK: 'tab-window:move-back',
+    /** Close the sender's tab for real, then its window (renderer->main) */
+    CLOSE_TAB: 'tab-window:close-tab',
+    /** Whether a tab window is open or restoring (renderer->main) */
+    IS_OPEN: 'tab-window:is-open',
+    /** Bring a tab window to the front (renderer->main) */
+    FOCUS: 'tab-window:focus',
+    /** Show a tab that came back from its window (main->renderer event) */
+    RETURN_TAB: 'tab-window:return-tab',
+    /** A tab in a tab window changed (main->renderer event) */
+    TAB_UPDATED: 'tab-window:tab-updated',
+    /** A tab in a tab window was closed there (main->renderer event) */
+    CLOSED_TAB: 'tab-window:closed-tab',
   },
 
   // File Tracking
@@ -1157,12 +1242,14 @@ export const IPC_CHANNELS = {
   // the per-window list and selection; CHANGED is a main→renderer push (also
   // in EVENT_CHANNELS). Types: `shared/types/machine-rail.ts`.
   // Recent agents: the app-wide list of opened agent conversations behind the
-  // recent-agent switcher. Main owns and persists it; CHANGED is a main→renderer
+  // recent-agent switcher, plus browser and terminal tabs. Main owns and persists it; CHANGED is a main→renderer
   // push of the whole list (also in EVENT_CHANNELS). Types: `shared/recent-agents.ts`.
   RECENT_AGENTS: {
     LIST: 'recent-agents:list',
     RECORD: 'recent-agents:record',
     FORGET_WORKSPACE: 'recent-agents:forget-workspace',
+    // Renderer → main: drop a browser or terminal tab its workspace no longer holds.
+    FORGET_TAB: 'recent-agents:forget-tab',
     CHANGED: 'recent-agents:changed',
     // Main → renderer: the switcher chord, or the release of its modifier, pressed
     // in a page of the browser panel, whose keys never reach the app's document
@@ -1275,6 +1362,7 @@ export const IPC_CHANNELS = {
 
 // Event channels that are sent from main to renderer
 export const EVENT_CHANNELS = [
+  IPC_CHANNELS.IN_APP_FILE_DIALOG.REQUEST,
   IPC_CHANNELS.DOCK_CONTEXT.CHANGED,
   IPC_CHANNELS.DOCK_SHORTCUTS.CHANGED,
   IPC_CHANNELS.DOCK_EVIDENCE.EVENT,
@@ -1521,6 +1609,10 @@ export const EVENT_CHANNELS = [
   // SSH machine setup progress (main → renderer): steps, redacted log lines,
   // the host-key question and the outcome. Never a secret or the link.
   'machine-setup:ssh-event',
+  // Tab windows (main → the window a tab came from): it came back, changed, or closed there.
+  IPC_CHANNELS.TAB_WINDOW.RETURN_TAB,
+  IPC_CHANNELS.TAB_WINDOW.TAB_UPDATED,
+  IPC_CHANNELS.TAB_WINDOW.CLOSED_TAB,
 ] as const;
 
 // Dynamic channel patterns that use runtime IDs

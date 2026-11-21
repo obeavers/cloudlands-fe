@@ -3,7 +3,7 @@
   import { effectiveShortcutReadable } from '$lib/utils/effective-shortcuts';
   import {
     matchSwitcherChord,
-    type RecentAgentEntry,
+    type RecentEntry,
     type RecentAgentPageKey,
   } from '$shared/recent-agents';
   import { onRecentAgentPageKey } from './page-key-forwarding';
@@ -11,12 +11,17 @@
     selectConnectedIds,
     selectCurrentConnectionId,
   } from '$store/renderer/slices/connections/connections-selectors';
-  import { selectRecentAgents } from '$store/renderer/slices/recent-agents/recent-agents-selectors';
+  import {
+    selectRecentAgents,
+    selectShownPanelTab,
+  } from '$store/renderer/slices/recent-agents/recent-agents-selectors';
   import { recentAgentOpenRequested } from '$store/renderer/slices/recent-agents/recent-agents-slice';
   import { selectCurrentlyViewedAgentId } from '$store/renderer/slices/unread-tracking/unread-tracking-selectors';
   import { store as appStore } from '$store/renderer/store';
+  import { routedWorkspaceId } from '$store/renderer/utils/routed-workspace-id';
   import RecentAgentSwitcherView from './RecentAgentSwitcherView.svelte';
   import {
+    isSwitcherModifierKeyUp,
     isSwitcherModifierReleased,
     stepSwitcher,
     switcherHeldModifiers,
@@ -30,27 +35,37 @@
   const currentConnectionId$ = selectCurrentConnectionId();
   const connectedIds$ = selectConnectedIds();
   const viewedAgentId$ = selectCurrentlyViewedAgentId();
+  const shownTab$ = selectShownPanelTab();
 
   const isMac =
     typeof navigator !== 'undefined' && navigator.platform.toUpperCase().includes('MAC');
 
   let switcher = $state<SwitcherState>(SWITCHER_CLOSED);
   /** The list as it was when the switcher opened; pushes do not reorder it mid-switch. */
-  let entries = $state<RecentAgentEntry[]>([]);
+  let entries = $state<RecentEntry[]>([]);
   let held: ReturnType<typeof switcherHeldModifiers> = null;
   let returnFocus: HTMLElement | null = null;
   let listbox = $state<HTMLElement | null>(null);
 
   const selectedIndex = $derived(switcher.open ? switcher.index : -1);
 
-  function isOffline(entry: RecentAgentEntry): boolean {
+  function isOffline(entry: RecentEntry): boolean {
     return (
       entry.connectionId !== $currentConnectionId$ && !$connectedIds$.includes(entry.connectionId)
     );
   }
 
-  function isShown(entry: RecentAgentEntry): boolean {
-    return entry.connectionId === $currentConnectionId$ && entry.agentId === $viewedAgentId$;
+  function isShown(entry: RecentEntry): boolean {
+    if (entry.connectionId !== $currentConnectionId$) return false;
+    // Outside a workspace route (Home, Settings) only the viewed chat counts: the tab strip
+    // keeps the last workspace's focused tab, which is not on screen.
+    const routed = routedWorkspaceId();
+    if (!routed) return entry.kind === 'agent' && entry.agentId === $viewedAgentId$;
+    const shown = $shownTab$;
+    if (!shown || entry.workspaceId !== routed) return false;
+    return entry.kind === 'agent'
+      ? shown.type === 'agent' && shown.agentId === entry.agentId
+      : shown.id === entry.tabId;
   }
 
   function apply(event: SwitcherEvent): void {
@@ -79,7 +94,7 @@
 
   /** A DOM key event, or one a browser-panel page forwarded through main. */
   type SwitcherKey = Omit<RecentAgentPageKey, 'type'> &
-    Partial<Pick<KeyboardEvent, 'preventDefault' | 'stopPropagation' | 'target'>>;
+    Partial<Pick<KeyboardEvent, 'preventDefault' | 'stopPropagation' | 'target' | 'repeat'>>;
 
   /** Settings → Keyboard shortcuts records the next chord; it must receive the switcher's too. */
   function isShortcutCapture(event: SwitcherKey): boolean {
@@ -96,15 +111,18 @@
   function onKeydown(event: SwitcherKey): void {
     if (!switcher.open) {
       if (isShortcutCapture(event)) return;
-      const direction = matchSwitcherChord(event, $binding$, isMac);
-      if (!direction || $recentAgents$.length === 0) return;
+      // Only the chord itself opens the switcher; Shift moves back once it is open.
+      if (matchSwitcherChord(event, $binding$, isMac) !== 'forward') return;
+      if ($recentAgents$.length === 0) return;
       swallow(event);
       entries = [...$recentAgents$];
       held = switcherHeldModifiers($binding$, isMac);
-      apply({ type: 'chord', backwards: direction === 'backward', sticky: held === null });
+      apply({ type: 'chord', backwards: false, sticky: held === null });
       return;
     }
     swallow(event);
+    // Holding Tab must not race through the list: one press, one step.
+    if (event.repeat) return;
     // The release happened while another window had the keys.
     if (held && isSwitcherModifierReleased(held, event)) {
       apply({ type: 'release' });
@@ -129,7 +147,7 @@
   function onKeyup(event: SwitcherKey): void {
     if (!switcher.open) return;
     swallow(event);
-    if (held && isSwitcherModifierReleased(held, event)) apply({ type: 'release' });
+    if (held && isSwitcherModifierKeyUp(held, event)) apply({ type: 'release' });
   }
 
   function onBlur(): void {

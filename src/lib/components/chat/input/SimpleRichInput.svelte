@@ -32,6 +32,7 @@
     isEnhancePromptAvailable,
   } from '$lib/client/live/live-prompt-enhancement';
   import { TooltipShortcut } from '$lib/components/ui/tooltip';
+  import DictationStopButton from '$features/voice/components/DictationStopButton.svelte';
   import TooltipRich from '$lib/components/ui/tooltip/TooltipRich.svelte';
   import ArrowUpIcon from 'phosphor-svelte/lib/ArrowUpIcon';
 
@@ -257,6 +258,7 @@
   import { cn } from '$lib/utils';
   import { store as appStore } from '$store/renderer/store';
   import { m } from '$shared/paraglide/messages.js';
+  import { sourcePathForFile } from '$lib/in-app-file-inputs';
   import {
     formatFileSize,
     imageFilesToContextItems,
@@ -1277,10 +1279,7 @@
         ? `pasted-file-${Date.now()}.${file.type.split('/')[1] || 'bin'}`
         : file.name;
 
-    const sourcePath =
-      (
-        window as unknown as { electronAPI?: { getPathForFile?: (f: File) => string } }
-      ).electronAPI?.getPathForFile?.(file) ?? '';
+    const sourcePath = sourcePathForFile(file);
 
     const mimeType = file.type || undefined;
     const itemId = `attachment-pending-${Date.now()}-${fileName}`;
@@ -2128,18 +2127,12 @@
             side="top"
             portalTarget={tooltipPortalTarget}
           >
-            <Button
-              variant="ghost-light"
-              size="icon-sm"
+            <DictationStopButton
               onclick={handleMicClick}
               onmousedown={handleMicMouseDown}
               aria-label={m.chat_richInput_micStop_label()}
-              aria-pressed="true"
-              class="text-danger animate-pulse"
               data-testid="composer-mic-button"
-            >
-              <Fa icon={faMicrophone} size="sm" />
-            </Button>
+            />
           </TooltipShortcut>
         {:else if $effectiveVoiceEngine$ !== 'unavailable'}
           <TooltipShortcut

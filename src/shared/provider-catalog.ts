@@ -36,6 +36,8 @@ const ProviderCatalogEntrySchema = z
     // Daemon-authoritative historical identities. Absence provides no alias mapping.
     legacyAliases: z.array(z.string().min(1)).optional(),
     loginCommandHint: z.string().optional(),
+    // `loginCommandHint` run from the npm fallback package, for a provider used through npx.
+    npxLoginCommandHint: z.string().optional(),
     loginDocsUrl: z.string().optional(),
     authErrorPatterns: z.array(z.string()).optional(),
     requiresEnvVar: z.string().optional(),
@@ -108,14 +110,25 @@ export type ProviderProfileSummary = z.infer<typeof ProviderProfileSummarySchema
 export type ProviderCatalogEntry = z.infer<typeof ProviderCatalogEntrySchema>;
 export type ProviderCatalogResult = z.infer<typeof ProviderCatalogResponseSchema>;
 
+// The daemon's own sign-in failure for any provider (intentd
+// `not_authenticated_message`): `provider "<id>" (<name>) is not
+// authenticated — run "<command>" in a terminal, then retry.`
+const DAEMON_NOT_AUTHENTICATED = /\) is not authenticated\b[^"]*"([^"]+)" in a terminal/;
+
+/** The login command named by the daemon's sign-in failure, or null for other errors. */
+export function daemonLoginCommand(errorMessage: string): string | null {
+  return DAEMON_NOT_AUTHENTICATED.exec(errorMessage)?.[1] ?? null;
+}
+
 /**
- * Whether an error message matches a catalog row's `authErrorPatterns`
- * (case-insensitive substring match). Rows without patterns never match.
+ * Whether an error message is the daemon's sign-in failure or matches a
+ * catalog row's `authErrorPatterns` (case-insensitive substring match).
  */
 export function isProviderAuthenticationErrorForEntry(
   entry: Pick<ProviderCatalogEntry, 'authErrorPatterns'> | undefined,
   errorMessage: string,
 ): boolean {
+  if (daemonLoginCommand(errorMessage)) return true;
   const patterns = entry?.authErrorPatterns;
   if (!patterns || patterns.length === 0) return false;
   const errorLower = errorMessage.toLowerCase();

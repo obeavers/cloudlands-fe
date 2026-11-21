@@ -27,6 +27,11 @@ import {
 import { getWindowIdsForWorkspace, sendToWorkspaceWindows } from '../../system/main/system.ipc';
 import { ANY_HOST } from '../../system/main/window-workspace-tracking';
 import { runInputAction, type InputAction } from './browser-input';
+import {
+  answerFileChooser,
+  enableFileChooserInterception,
+  type FileChooserOpenedParams,
+} from './browser-file-chooser';
 
 const logger = new Logger('EmbeddedBrowserCdp');
 /** Packaged-build breadcrumbs for agent background hosting (intent-hq/intent#7855). */
@@ -216,6 +221,23 @@ type ClaimTabResult =
   | { status: 'already-claimed'; ownerAgentId: string };
 
 /**
+ * Browser-tab pages that main owns as a `WebContentsView` (BrowserViewService)
+ * instead of a `<webview>` guest. Such a page has no `hostWebContents` and is
+ * not of type `webview`, so the service asks this seam instead.
+ */
+export interface MainOwnedBrowserViews {
+  /** Whether `webContentsId` is a live main-owned browser view. */
+  owns(webContentsId: number): boolean;
+  /** The app renderer that shows the view's tab (the machine view of its window). */
+  hostFor(webContentsId: number): WebContents | undefined;
+  /**
+   * Keep a main-owned view painting while it is not on screen (parked under
+   * the machine view); returns the release, or undefined when not main-owned.
+   */
+  holdDrawing(webContentsId: number): (() => void) | undefined;
+}
+
+/**
  * Service for managing CDP connections to embedded browser webviews.
  *
  * Responsibilities:
@@ -224,9 +246,17 @@ type ClaimTabResult =
  * - CDP execution: runs scripts/commands on browser tabs via webContents.debugger
  * - Tab focus: brings unmounted tabs back to life by requesting UI switch
  */
+/** Show the in-app open picker in `host`; resolves chosen paths or `null` on cancel. */
+type InAppFileChooser = (
+  host: WebContents,
+  options: { multiple: boolean; accept?: string },
+) => Promise<string[] | null>;
+
 class EmbeddedBrowserCdpService {
   /** Map of tabId -> webContentsId */
   private tabRegistry = new Map<string, number>();
+  /** Main-owned browser views, when the BrowserViewService is running. */
+  private mainOwnedViews: MainOwnedBrowserViews | null = null;
   private registeredWorkspaceOwners = new Map<
     number,
     {
@@ -238,6 +268,16 @@ class EmbeddedBrowserCdpService {
 
   /** Set of webContentsIds that have debugger attached */
   private attachedDebuggers = new Set<number>();
+  /**
+   * The in-app picker for website file choosers, set by main/index.ts only
+   * under INTENT_IN_APP_PICKER (injected so this module does not import the
+   * main-process dialog graph).
+   */
+  private inAppFileChooser: InAppFileChooser | null = null;
+  /** Tabs whose website file choosers go to the in-app picker (INTENT_IN_APP_PICKER). */
+  private fileChooserTabs = new Set<number>();
+  /** Of those, the ones whose current CDP session has interception on. */
+  private fileChooserArmed = new Set<number>();
 
   /**
    * Cache of browser tabs from panel layout (includes unmounted tabs),
@@ -549,8 +589,26 @@ class EmbeddedBrowserCdpService {
     return Math.max(LIST_TABS_TIMEOUT_MS, Math.min(ADOPTED_LIST_TABS_TIMEOUT_MS, halfRemaining));
   }
 
+  /** Connect (or, with null, disconnect) the main-owned browser views. */
+  setMainOwnedBrowserViews(views: MainOwnedBrowserViews | null): void {
+    this.mainOwnedViews = views;
+  }
+
+  /** A browser-tab page: a `<webview>` guest or a main-owned browser view. */
+  private isBrowserTabContents(wc: WebContents): boolean {
+    return wc.getType() === 'webview' || (this.mainOwnedViews?.owns(wc.id) ?? false);
+  }
+
+  /** The app renderer showing a tab page: the guest's host, or the view's machine view. */
+  private hostOf(wc: WebContents): WebContents | undefined {
+    const host = wc.hostWebContents ?? this.mainOwnedViews?.hostFor(wc.id);
+    return host && !host.isDestroyed() ? host : undefined;
+  }
+
   /**
-   * Register a browser tab for CDP access
+   * Register a browser tab for CDP access. A main-owned view registers when
+   * it is created and again after it moves to another window, so the
+   * workspace binding follows the new host.
    */
   registerTab(tabId: string, webContentsId: number, workspaceId?: string): void {
     // A dom-ready registration can arrive after its guest has already died.
@@ -563,7 +621,7 @@ class EmbeddedBrowserCdpService {
       hostingLogger.info('tab registered', { tabId, webContentsId });
     }
     this.tabRegistry.set(tabId, webContentsId);
-    const host = wc.hostWebContents;
+    const host = this.hostOf(wc);
     const binding = host && getStrictBackendBindingForWebContents(host);
     if (workspaceId && host && binding) {
       this.registeredWorkspaceOwners.set(webContentsId, { workspaceId, host, binding });
@@ -573,6 +631,16 @@ class EmbeddedBrowserCdpService {
     // An agent acting on this tab (possibly the action that mounted it on
     // demand) keeps the new guest drawing too.
     if (this.agentDrawing.has(tabId)) this.attachAgentDrawing(tabId);
+
+    // Intent OS: route this page's file uploads through the in-app picker.
+    if (this.inAppFileChooser) {
+      this.armFileChooser(webContentsId).catch((error: unknown) => {
+        logger.warn('Could not intercept file choosers for browser tab', {
+          webContentsId,
+          error: error instanceof Error ? error.message : String(error),
+        });
+      });
+    }
 
     // Owned tabs are always emulated (docs/protocol §5.9): (re)apply the
     // recorded viewport on every registration so emulation survives
@@ -784,7 +852,7 @@ class EmbeddedBrowserCdpService {
     const contents = webContents.fromId(webContentsId);
     if (!tab || !contents || contents.isDestroyed()) return null;
     const owner = this.registeredWorkspaceOwners.get(webContentsId);
-    const host = contents.hostWebContents;
+    const host = this.hostOf(contents);
     if (
       !owner ||
       !host ||
@@ -812,7 +880,7 @@ class EmbeddedBrowserCdpService {
 
     for (const wc of allWebContents) {
       // Only include webviews (not the main window or other webContents)
-      if (wc.getType() === 'webview' && !wc.isDestroyed()) {
+      if (!wc.isDestroyed() && this.isBrowserTabContents(wc)) {
         const webContentsId = wc.id;
 
         // Try to find the registered tabId, or generate a fallback
@@ -1275,7 +1343,7 @@ class EmbeddedBrowserCdpService {
     if (tabId.startsWith('webview-')) {
       const webContentsId = parseInt(tabId.replace('webview-', ''), 10);
       const wc = webContents.fromId(webContentsId);
-      if (wc && !wc.isDestroyed() && wc.getType() === 'webview') {
+      if (wc && !wc.isDestroyed() && this.isBrowserTabContents(wc)) {
         return webContentsId;
       }
     }
@@ -1356,6 +1424,13 @@ class EmbeddedBrowserCdpService {
    */
   private onDebuggerDetached(webContentsId: number): void {
     this.attachedDebuggers.delete(webContentsId);
+    // Interception lives in the CDP session; a later session must turn it on again.
+    if (this.fileChooserArmed.delete(webContentsId) && this.fileChooserTabs.has(webContentsId)) {
+      setTimeout(() => {
+        if (!this.fileChooserTabs.has(webContentsId)) return;
+        this.armFileChooser(webContentsId).catch(() => undefined);
+      }, 1000);
+    }
     for (const [tabId, mappedWebContentsId] of this.tabRegistry) {
       if (mappedWebContentsId === webContentsId) {
         this.tabsWithDeviceMetricsOverride.delete(tabId);
@@ -2002,6 +2077,63 @@ class EmbeddedBrowserCdpService {
   }
 
   /**
+   * Route browser-tab file choosers to the in-app picker from now on. Tabs
+   * that registered earlier are armed on their next registration (dom-ready).
+   */
+  setInAppFileChooser(pick: InAppFileChooser | null): void {
+    this.inAppFileChooser = pick;
+  }
+
+  /**
+   * Intercept the tab's file choosers (once per CDP session) and answer them
+   * with the in-app picker shown in the tab's app renderer.
+   */
+  private async armFileChooser(webContentsId: number): Promise<void> {
+    const wc = webContents.fromId(webContentsId);
+    if (!wc || wc.isDestroyed()) return;
+    if (!this.fileChooserTabs.has(webContentsId)) {
+      this.fileChooserTabs.add(webContentsId);
+      wc.debugger.on('message', (_event, method, params, sessionId) => {
+        if (sessionId || method !== 'Page.fileChooserOpened') return;
+        void this.onFileChooserOpened(webContentsId, params as FileChooserOpenedParams);
+      });
+      wc.once('destroyed', () => {
+        this.fileChooserTabs.delete(webContentsId);
+        this.fileChooserArmed.delete(webContentsId);
+      });
+    }
+    if (this.fileChooserArmed.has(webContentsId)) return;
+    await enableFileChooserInterception({
+      send: (method, params) => this.sendCommand(webContentsId, method, params),
+    });
+    this.fileChooserArmed.add(webContentsId);
+  }
+
+  private async onFileChooserOpened(
+    webContentsId: number,
+    params: FileChooserOpenedParams,
+  ): Promise<void> {
+    const wc = webContents.fromId(webContentsId);
+    if (!wc || wc.isDestroyed()) return;
+    const host = this.hostOf(wc);
+    try {
+      await answerFileChooser(
+        { send: (method, commandParams) => this.sendCommand(webContentsId, method, commandParams) },
+        params,
+        (options) =>
+          host && this.inAppFileChooser
+            ? this.inAppFileChooser(host, options)
+            : Promise.resolve(null),
+      );
+    } catch (error) {
+      logger.warn('Browser tab file chooser failed', {
+        webContentsId,
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
+  }
+
+  /**
    * Send a CDP command to a webContents
    */
   private async sendCommand(
@@ -2301,7 +2433,7 @@ class EmbeddedBrowserCdpService {
     // cost is that a hidden app UI reports itself visible for the duration
     // of the capture (presence is told to ignore it); a visible window is
     // unaffected.
-    const targets = [guest, guest.hostWebContents].filter(
+    const targets = [guest, this.hostOf(guest)].filter(
       (wc): wc is Electron.WebContents => !!wc && !wc.isDestroyed(),
     );
     const held: Electron.WebContents[] = [];
@@ -2326,6 +2458,18 @@ class EmbeddedBrowserCdpService {
         });
       }
     }
+    // A main-owned view that is not on screen does not paint at all: park
+    // it under its window's machine view for the hold (BrowserViewService).
+    // Taken after the throttling holds above and released after them.
+    let releaseParking: (() => void) | undefined;
+    try {
+      releaseParking = this.mainOwnedViews?.holdDrawing(webContentsId);
+    } catch (error) {
+      logger.debug('Could not park a browser view for drawing', {
+        webContentsId,
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
     let released = false;
     return () => {
       if (released) return;
@@ -2345,6 +2489,7 @@ class EmbeddedBrowserCdpService {
           // A webContents torn down mid-capture has nothing left to restore.
         }
       }
+      releaseParking?.();
     };
   }
 
@@ -2420,7 +2565,16 @@ class EmbeddedBrowserCdpService {
       return;
     }
     const webContentsId = this.resolveTabId(tabId);
-    if (entry.guest && entry.guest.webContentsId !== webContentsId) this.detachAgentDrawing(tabId);
+    if (entry.guest) {
+      // A new guest (offscreen <-> panel handoff), or the same main-owned
+      // page moved to another window: its host changed, so the old host's
+      // capture hold and drawing box are released and the new host is held.
+      const current = webContentsId === undefined ? undefined : webContents.fromId(webContentsId);
+      const hostNow = current && !current.isDestroyed() ? this.hostOf(current) : undefined;
+      if (entry.guest.webContentsId !== webContentsId || entry.guest.host !== hostNow) {
+        this.detachAgentDrawing(tabId);
+      }
+    }
     if (webContentsId === undefined) return;
     try {
       if (!entry.guest) {
@@ -2434,10 +2588,7 @@ class EmbeddedBrowserCdpService {
         guest.once('destroyed', onDestroyed);
         entry.guest = {
           webContentsId,
-          host:
-            guest.hostWebContents && !guest.hostWebContents.isDestroyed()
-              ? guest.hostWebContents
-              : undefined,
+          host: this.hostOf(guest),
           release: this.holdCaptureDrawing(webContentsId),
           detach: () => guest.removeListener('destroyed', onDestroyed),
         };
@@ -2617,18 +2768,20 @@ class EmbeddedBrowserCdpService {
 
   /**
    * Evaluate JavaScript in a tab. With a `deadline`, the command is bounded
-   * by the remaining request budget (#4835).
+   * by the remaining request budget (#4835). `awaitPromise` returns the
+   * settled value of a promise result.
    */
   async evaluate(
     tabId: string | undefined,
     expression: string,
-    options: CaptureOptions = {},
+    options: CaptureOptions & { awaitPromise?: boolean } = {},
   ): Promise<unknown> {
     const webContentsId = this.resolveActionTarget(tabId);
     const result = (await this.withDeadline(
       this.sendCommand(webContentsId, 'Runtime.evaluate', {
         expression,
         returnByValue: true,
+        ...(options.awaitPromise ? { awaitPromise: true } : {}),
       }),
       'Runtime.evaluate',
       options.deadline,

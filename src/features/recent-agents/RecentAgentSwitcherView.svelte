@@ -1,14 +1,14 @@
 <script lang="ts">
   import { m } from '$shared/paraglide/messages.js';
-  import { recentAgentKey, type RecentAgentEntry } from '$shared/recent-agents';
+  import { recentEntryKey, type RecentEntry } from '$shared/recent-agents';
   import RecentAgentCard from './RecentAgentCard.svelte';
 
   interface Props {
-    entries: RecentAgentEntry[];
+    entries: RecentEntry[];
     selectedIndex: number;
     /** This window's machine: its entries show live status. */
     currentConnectionId: string;
-    isOffline: (entry: RecentAgentEntry) => boolean;
+    isOffline: (entry: RecentEntry) => boolean;
     onpoint: (index: number) => void;
     onchoose: (index: number) => void;
     listbox?: HTMLElement | null;
@@ -25,6 +25,19 @@
   }: Props = $props();
 
   const optionId = (index: number) => `recent-agent-option-${index}`;
+
+  /**
+   * Chromium sends pointer moves without any motion when the list appears under the pointer or
+   * scrolls the selection into view. Only real motion selects a card, or a still pointer would
+   * keep pulling the selection back while Tab moves it.
+   */
+  let lastPointer: { x: number; y: number } | null = null;
+  function pointed(index: number, event: PointerEvent): void {
+    const moved =
+      lastPointer !== null && (lastPointer.x !== event.screenX || lastPointer.y !== event.screenY);
+    lastPointer = { x: event.screenX, y: event.screenY };
+    if (moved) onpoint(index);
+  }
 
   $effect(() => {
     if (selectedIndex < 0) return;
@@ -47,14 +60,14 @@
     aria-activedescendant={selectedIndex >= 0 ? optionId(selectedIndex) : undefined}
     class="overlay-surface pointer-events-auto flex max-w-full gap-2 overflow-x-auto bg-popover p-2 text-popover-foreground outline-none"
   >
-    {#each entries as entry, index (recentAgentKey(entry))}
+    {#each entries as entry, index (recentEntryKey(entry))}
       <RecentAgentCard
         {entry}
         id={optionId(index)}
         selected={index === selectedIndex}
         local={entry.connectionId === currentConnectionId}
         offline={isOffline(entry)}
-        onpoint={() => onpoint(index)}
+        onpoint={(event) => pointed(index, event)}
         onchoose={() => onchoose(index)}
       />
     {/each}

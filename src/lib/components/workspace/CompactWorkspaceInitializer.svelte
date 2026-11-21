@@ -128,6 +128,7 @@
   import { notify } from '$lib/components/patterns/notify';
   import { fade, slide } from '$lib/motion';
   import Button from '../ui/button/button.svelte';
+  import DictationStopButton from '$features/voice/components/DictationStopButton.svelte';
   import { IntentMarkLoader } from '$lib/components/ui/indicators';
   import CreateButtonProgress from './initializer/CreateButtonProgress.svelte';
   import WorkspaceCreateButton from './initializer/WorkspaceCreateButton.svelte';
@@ -211,6 +212,7 @@
   import { deserializeDraftAttachments } from '$lib/components/chat/chat-draft-attachments';
   import { resolveGitHubPrefillSelection } from './initializer/github-prefill';
   import { createRepoCacheWarmer } from './initializer/warm-repo-cache';
+  import { sourcePathForFile } from '$lib/in-app-file-inputs';
   import {
     matchGitHubPrefillRepo,
     type GitHubPrefillRepoCandidate,
@@ -3174,7 +3176,7 @@
         // read or kept — sourcePath only. A drop with no resolvable host path
         // (e.g. clipboard bytes without a backing file) is a failed pill
         // immediately: it blocks create until retried or removed.
-        const sourcePath = (window as any).electronAPI?.getPathForFile?.(file) || '';
+        const sourcePath = sourcePathForFile(file);
         const fileName = file.name || `pasted-file-${Date.now()}`;
 
         const contextItem: ContextItem = {
@@ -3728,20 +3730,14 @@
                     <IntentMarkLoader size={16} />
                   </Button>
                 {:else if micRecording}
-                  <Button
+                  <DictationStopButton
                     type="button"
-                    size="icon"
-                    variant="ghost"
                     onclick={handleMicClick}
                     tooltip={m.chat_richInput_micStop_label()}
                     tooltipSide="top"
                     aria-label={m.chat_richInput_micStop_label()}
-                    aria-pressed="true"
-                    class="text-danger animate-pulse"
                     data-testid="initializer-mic-button"
-                  >
-                    <Fa icon={faMicrophone} />
-                  </Button>
+                  />
                 {:else}
                   <Button
                     type="button"

@@ -18,9 +18,15 @@
 
 import { app, session, systemPreferences } from 'electron';
 import { openExternal } from './open-external';
+import { isSystemBrowserDisabled } from './web-link-routing';
 import * as path from 'path';
 import { fileURLToPath } from 'url';
-import { BROWSER_PANEL_PARTITION, BROWSER_PROTOCOLS } from '../shared/constants';
+import {
+  BROWSER_PANEL_PARTITION,
+  BROWSER_PROTOCOLS,
+  WEBVIEW_BLINK_FEATURES,
+} from '../shared/constants';
+import { arePasskeysEnabled } from '../features/passkeys/main/passkeys.ipc';
 import {
   HUD_ROUTE_PREFIX,
   findExistingHudWindow,
@@ -231,6 +237,103 @@ function trackWebviewPopup(popupWindow: Electron.BrowserWindow): void {
 }
 
 /**
+ * Browser-tab pages that main owns as a `WebContentsView` (BrowserViewService)
+ * instead of a `<webview>` guest. Their webContents type is not `webview`, so
+ * every guest rule below asks {@link isBrowserGuest} instead of the type.
+ */
+const mainOwnedBrowserContentsIds = new Set<number>();
+
+/** A browser-tab page: a `<webview>` guest or a main-owned browser view. */
+function isBrowserGuest(contents: Electron.WebContents | null | undefined): boolean {
+  if (!contents) return false;
+  return contents.getType() === 'webview' || mainOwnedBrowserContentsIds.has(contents.id);
+}
+
+/**
+ * Web preferences every browser-tab page gets, for a `<webview>` (applied in
+ * `will-attach-webview`) and for a main-owned browser view (passed to its
+ * constructor): no preload, no Node.js, context isolation, sandbox, web
+ * security on. One function, so the two paths cannot drift.
+ */
+function applyBrowserGuestWebPreferences(webPreferences: Electron.WebPreferences): void {
+  // Remove any preload scripts that might be injected
+  delete webPreferences.preload;
+  // Disable Node.js integration in webviews (critical security)
+  webPreferences.nodeIntegration = false;
+  webPreferences.nodeIntegrationInWorker = false;
+  webPreferences.nodeIntegrationInSubFrames = false;
+  // Enable context isolation (prevents prototype pollution attacks)
+  webPreferences.contextIsolation = true;
+  // Enable sandbox (additional process isolation)
+  webPreferences.sandbox = true;
+  // Keep web security on
+  webPreferences.webSecurity = true;
+  // Don't allow running insecure content
+  webPreferences.allowRunningInsecureContent = false;
+  // A browser page never hosts its own <webview>
+  webPreferences.webviewTag = false;
+  // Expose `document.modelContext` so pages can offer WebMCP tools to the
+  // agent browser's listTools / callTool actions.
+  webPreferences.enableBlinkFeatures = WEBVIEW_BLINK_FEATURES;
+}
+
+/**
+ * Constructor web preferences for a main-owned browser view: the guest rules
+ * above on the browser-panel session, with normal background throttling (a
+ * parked view lifts it only while held).
+ */
+export function buildBrowserViewWebPreferences(): Electron.WebPreferences {
+  const webPreferences: Electron.WebPreferences = {
+    partition: BROWSER_PANEL_PARTITION,
+    backgroundThrottling: true,
+  };
+  applyBrowserGuestWebPreferences(webPreferences);
+  return webPreferences;
+}
+
+/**
+ * Guest-only listeners: popup tracking (OAuth windows navigate freely) and
+ * the window.close() breadcrumbs (intent-hq/intent#5241).
+ */
+function attachBrowserGuestListeners(contents: Electron.WebContents): void {
+  contents.on('did-create-window', (popupWindow) => {
+    trackWebviewPopup(popupWindow);
+  });
+  const guestId = contents.id;
+  // `close` is emitted by WebContents::CloseContents but is absent from
+  // electron.d.ts, so the typed `on` overloads reject it.
+  (contents as unknown as NodeJS.EventEmitter).on('close', () => {
+    logger.info('Browser page requested window.close()', {
+      guestId,
+      url: describeUrlForLog(contents.getURL()),
+    });
+  });
+  contents.once('destroyed', () => {
+    logger.debug('Browser page destroyed', { guestId });
+  });
+}
+
+/**
+ * Give a main-owned browser view the same rules as a `<webview>` guest:
+ * the guest navigation and popup policy, popup tracking, and (through its
+ * browser-panel session) the browser-panel permission handlers. Call right
+ * after the view is created, before its first load.
+ */
+export function secureMainOwnedBrowserContents(contents: Electron.WebContents): void {
+  if (mainOwnedBrowserContentsIds.has(contents.id)) return;
+  const id = contents.id;
+  mainOwnedBrowserContentsIds.add(id);
+  contents.once('destroyed', () => mainOwnedBrowserContentsIds.delete(id));
+  attachBrowserGuestListeners(contents);
+  setupBrowserPanelSession();
+}
+
+/** Whether a URL may load in a browser-tab page (the guest navigation rule). */
+export function isBrowserGuestNavigationAllowed(url: string): boolean {
+  return !isBlockedProtocol(url) && isWebviewAllowedUrl(url);
+}
+
+/**
  * Let an Intent-owned web window (the sign-in window) follow http(s)
  * navigations and redirects itself, like a webview popup, instead of the
  * app-window policy that sends them to the system browser. Call before loadURL.
@@ -257,25 +360,7 @@ export function setupWebviewSecurity(): void {
         allowpopups: params.allowpopups,
       });
 
-      // Remove any preload scripts that might be injected
-      delete webPreferences.preload;
-
-      // Disable Node.js integration in webviews (critical security)
-      webPreferences.nodeIntegration = false;
-      webPreferences.nodeIntegrationInWorker = false;
-      webPreferences.nodeIntegrationInSubFrames = false;
-
-      // Enable context isolation (prevents prototype pollution attacks)
-      webPreferences.contextIsolation = true;
-
-      // Enable sandbox (additional process isolation)
-      webPreferences.sandbox = true;
-
-      // Disable web security only if explicitly needed (keep enabled)
-      webPreferences.webSecurity = true;
-
-      // Don't allow running insecure content
-      webPreferences.allowRunningInsecureContent = false;
+      applyBrowserGuestWebPreferences(webPreferences);
 
       // If this webview uses the browser panel partition, ensure its session
       // has the OAuth-friendly permission handlers configured.
@@ -283,6 +368,11 @@ export function setupWebviewSecurity(): void {
       // when the webview attaches (rather than at app startup).
       if (partition === BROWSER_PANEL_PARTITION) {
         setupBrowserPanelSession();
+        // The passkey frame preload must also reach iframes, so a cross-origin
+        // iframe gets a NotAllowedError from main instead of Chromium's own,
+        // UI-less WebAuthn. The guest stays sandboxed with context isolation
+        // and no Node.js; this only lets session preloads run in subframes.
+        if (arePasskeysEnabled()) webPreferences.nodeIntegrationInSubFrames = true;
       }
 
       logger.debug('Webview security settings enforced', {
@@ -304,7 +394,7 @@ export function setupWebviewSecurity(): void {
         return;
       }
 
-      if (contents.getType() === 'webview') {
+      if (isBrowserGuest(contents)) {
         if (!isWebviewAllowedUrl(url)) {
           logger.warn('Blocked disallowed protocol navigation in webview', {
             url: url.substring(0, 100),
@@ -365,8 +455,24 @@ export function setupWebviewSecurity(): void {
     let allowedHudPopupBackendId: string | null = null;
 
     // Handle new window creation (popups) from webviews and app windows
-    contents.setWindowOpenHandler(({ url }) => {
-      if (contents.getType() === 'webview') {
+    contents.setWindowOpenHandler(({ url, disposition, postBody }) => {
+      // Intent OS: a plain new-tab link (target=_blank) opens as a browser tab in
+      // the app, not as a separate window. Scripted popups ('new-window', e.g.
+      // OAuth) and POST submissions (form/SAML, which a URL alone cannot carry)
+      // keep the popup window.
+      if (
+        isBrowserGuest(contents) &&
+        isSystemBrowserDisabled() &&
+        !postBody &&
+        (disposition === 'foreground-tab' || disposition === 'background-tab') &&
+        /^https?:/i.test(url)
+      ) {
+        openExternal(url).catch((err: Error) => {
+          logger.warn('Failed to open new-tab link in app', { error: err.message });
+        });
+        return { action: 'deny' };
+      }
+      if (isBrowserGuest(contents)) {
         logger.debug('Webview requested new window', { url: url.substring(0, 100) });
 
         if (isBlockedProtocol(url)) {
@@ -502,26 +608,7 @@ export function setupWebviewSecurity(): void {
     // Also track popups created from webview popups (nested popups) so that
     // MFA prompts or alternative sign-in options inside a login popup work.
     if (contents.getType() === 'webview') {
-      contents.on('did-create-window', (popupWindow) => {
-        trackWebviewPopup(popupWindow);
-      });
-
-      // Diagnosability (intent-hq/intent#5241): a guest page calling
-      // window.close() makes Electron emit `close` and then destroy the guest
-      // unconditionally while its <webview> element is still in the DOM, so
-      // log both steps to attribute a dead tab to its trigger.
-      const guestId = contents.id;
-      // `close` is emitted by WebContents::CloseContents but is absent from
-      // electron.d.ts, so the typed `on` overloads reject it.
-      (contents as unknown as NodeJS.EventEmitter).on('close', () => {
-        logger.info('Webview guest requested window.close(); Electron will destroy the guest', {
-          guestId,
-          url: describeUrlForLog(contents.getURL()),
-        });
-      });
-      contents.once('destroyed', () => {
-        logger.debug('Webview guest destroyed', { guestId });
-      });
+      attachBrowserGuestListeners(contents);
     } else {
       // App-window popups: register a newly allowed /hud popup as THE HUD
       // for its opener's backend immediately (its URL is still loading, so
@@ -530,6 +617,9 @@ export function setupWebviewSecurity(): void {
       // Stamp BEFORE registering: the registry keys off the backend stamp,
       // and the stamp also routes the popup renderer's IPC to that backend.
       contents.on('did-create-window', (popupWindow, details) => {
+        // A main-owned browser view is created as a non-webview and marked a
+        // guest right after: its popups are web popups, never the HUD.
+        if (isBrowserGuest(contents)) return;
         try {
           if (isHudRouteUrl(new URL(details.url))) {
             // Prefer the backend captured when the popup was allowed — the
@@ -598,7 +688,7 @@ function setupPermissionHandlers(ses: Electron.Session): void {
     // the grant is reported only to the app shell's own origin — mirroring
     // the request handler's gate above.
     if (permission === 'media') {
-      if (webContents?.getType() === 'webview') {
+      if (isBrowserGuest(webContents)) {
         return false;
       }
       return details.mediaType !== 'video' && isAppShellUrl(url);
@@ -625,7 +715,7 @@ function isAllowedMicrophoneRequest(
   webContents: Electron.WebContents | null,
   details: Electron.PermissionRequest,
 ): boolean {
-  if (webContents?.getType() === 'webview') {
+  if (isBrowserGuest(webContents)) {
     return false;
   }
   const mediaTypes = (details as Electron.MediaAccessPermissionRequest).mediaTypes;
@@ -683,7 +773,8 @@ async function grantMicrophoneAccess(): Promise<boolean> {
  *    are blocked as third-party cookies.
  *
  * 2. top-level-storage-access: Allows top-level sites to request cookie access on behalf
- *    of embedded content. Used by federated login (FedCM) and some SSO flows.
+ *    of embedded content. Used by some federated SSO flows. (FedCM itself is turned
+ *    off app-wide: Electron has no account chooser for it; see chromium-features.ts.)
  *
  * 3. clipboard-read/write: Standard copy/paste support.
  *
